@@ -75,21 +75,22 @@ class TestChunkEndpoints:
     @pytest.mark.asyncio
     async def test_search_chunks(self, client):
         """Test chunk search endpoint."""
-        with patch(
-            "services.document_processing.app.api.deps.get_embedding_generator"
-        ) as mock_gen, patch(
-            "services.document_processing.app.api.deps.get_qdrant_client"
-        ) as mock_qdrant:
-            # Mock embedding generator
-            mock_generator = AsyncMock()
-            mock_generator.generate_single = AsyncMock(return_value=[0.1] * 384)
-            mock_gen.return_value = mock_generator
+        from services.document_processing.app.main import app
+        from services.document_processing.app.api import deps
 
-            # Mock Qdrant client
-            mock_qdrant_client = AsyncMock()
-            mock_qdrant_client.search = AsyncMock(return_value=[])
-            mock_qdrant.return_value = mock_qdrant_client
+        # Create mock embedding generator
+        mock_generator = AsyncMock()
+        mock_generator.generate_single = AsyncMock(return_value=[0.1] * 384)
 
+        # Create mock Qdrant client
+        mock_qdrant_client = AsyncMock()
+        mock_qdrant_client.search = AsyncMock(return_value=[])
+
+        # Override dependencies
+        app.dependency_overrides[deps.get_embedding_generator] = lambda: mock_generator
+        app.dependency_overrides[deps.get_qdrant_client] = lambda: mock_qdrant_client
+
+        try:
             response = await client.post(
                 "/api/v1/chunks/search",
                 params={"query": "solar flares"},
@@ -99,3 +100,7 @@ class TestChunkEndpoints:
             data = response.json()
             assert "results" in data
             assert "count" in data
+        finally:
+            # Clean up overrides (but keep the db override from client fixture)
+            app.dependency_overrides.pop(deps.get_embedding_generator, None)
+            app.dependency_overrides.pop(deps.get_qdrant_client, None)

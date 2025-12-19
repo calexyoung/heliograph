@@ -156,8 +156,8 @@ class TestDocumentRegistration:
         assert response.status_code == 422
 
     @pytest.mark.asyncio
-    async def test_register_event_publish_failure_returns_503(self, test_client, mock_sqs_client):
-        """Test that event publish failure returns 503."""
+    async def test_register_continues_despite_event_publish_failure(self, test_client, mock_sqs_client):
+        """Test that document is registered even when event publishing fails."""
         mock_sqs_client.send_message.return_value = None  # Simulate failure
 
         user_id = str(uuid4())
@@ -171,9 +171,11 @@ class TestDocumentRegistration:
 
         response = await test_client.post("/registry/documents", json=request_data)
 
-        assert response.status_code == 503
+        # Document should still be registered even if event publishing fails
+        assert response.status_code == 200
         data = response.json()
-        assert data["detail"]["error_code"] == "EVENT_PUBLISH_FAILED"
+        assert data["status"] == "queued"
+        assert "document_id" in data
 
 
 class TestDocumentRetrieval:

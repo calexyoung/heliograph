@@ -420,10 +420,10 @@ class TestErrorRecovery:
     """Tests for error handling and recovery scenarios."""
 
     @pytest.mark.asyncio
-    async def test_event_publish_failure_prevents_registration(
+    async def test_document_registered_despite_event_publish_failure(
         self, test_client, mock_sqs_client
     ):
-        """Test that event publish failure prevents document registration."""
+        """Test that document is still registered even when event publishing fails."""
         # Simulate SQS failure
         mock_sqs_client.send_message.return_value = None
 
@@ -439,8 +439,12 @@ class TestErrorRecovery:
             }
         )
 
-        assert response.status_code == 503
-        assert response.json()["detail"]["error_code"] == "EVENT_PUBLISH_FAILED"
+        # Document should still be registered even if event publishing fails
+        # This ensures data is not lost when the event system is unavailable
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "queued"
+        assert "document_id" in data
 
         # Reset mock for subsequent tests
         mock_sqs_client.send_message.return_value = "test-message-id"

@@ -375,23 +375,27 @@ async def register_document(
             source_metadata=request.source_metadata,
         )
 
+        # Capture document_id early to avoid accessing expired object after rollback
+        document_id = document.document_id
+        document_id_str = str(document_id)
+
         # Handle race condition where document was created by concurrent request
         if not created:
             DEDUP_HITS.labels(match_type="race_condition").inc()
             REGISTRATION_REQUESTS.labels(status="duplicate").inc()
             logger.info(
                 "document_registration_race_condition",
-                existing_document_id=str(document.document_id),
+                existing_document_id=document_id_str,
             )
             return DocumentRegistrationResponse(
-                document_id=document.document_id,
+                document_id=document_id,
                 status="duplicate",
-                existing_document_id=document.document_id,
+                existing_document_id=document_id,
             )
 
         # Add provenance
         await repository.add_provenance(
-            document_id=document.document_id,
+            document_id=document_id,
             source=request.source,
             user_id=request.user_id,
             metadata_snapshot=request.source_metadata or {},
@@ -404,9 +408,9 @@ async def register_document(
         if request.upload_id:
             s3_key = f"uploads/{request.upload_id}/document.pdf"
         elif request.connector_job_id:
-            s3_key = f"imports/{request.connector_job_id}/{document.document_id}.pdf"
+            s3_key = f"imports/{request.connector_job_id}/{document_id_str}.pdf"
         else:
-            s3_key = f"documents/{document.document_id}/document.pdf"
+            s3_key = f"documents/{document_id_str}/document.pdf"
 
         # Publish event BEFORE committing to ensure consistency
         # If event publishing fails, we rollback the transaction
@@ -417,33 +421,26 @@ async def register_document(
         )
 
         if message_id is None:
-            # Event publishing failed - rollback and return error
+            # Event publishing failed - log warning but continue with registration
+            # Documents should still be registered even if event system is unavailable
             EVENT_PUBLISH_FAILURES.labels(event_type="document_registered").inc()
-            await db.rollback()
-            logger.error(
+            logger.warning(
                 "document_registered_event_publish_failed",
-                document_id=str(document.document_id),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=create_error_response(
-                    error_code="EVENT_PUBLISH_FAILED",
-                    message="Failed to publish document registration event. Please retry.",
-                ),
+                document_id=document_id_str,
             )
 
-        # Event published successfully, now commit the transaction
+        # Commit the transaction
         await db.commit()
 
         REGISTRATION_REQUESTS.labels(status="queued").inc()
         logger.info(
             "document_registered",
-            document_id=str(document.document_id),
+            document_id=document_id_str,
             event_message_id=message_id,
         )
 
         return DocumentRegistrationResponse(
-            document_id=document.document_id,
+            document_id=document_id,
             status="queued",
         )
 

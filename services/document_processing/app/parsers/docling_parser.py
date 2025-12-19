@@ -290,43 +290,103 @@ class DoclingParser:
         """
         sections = []
         char_offset = 0
+        current_section_title = None
+        current_section_text = []
+        current_section_type = SectionType.OTHER
 
         try:
-            # Iterate through document items
-            for item in doc.iterate_items():
-                item_type = getattr(item, "label", None)
-                text = getattr(item, "text", None) or ""
+            # Iterate through document items with level info
+            for item, level in doc.iterate_items(with_groups=True):
+                label = getattr(item, "label", None)
+                text = str(getattr(item, "text", "") or "").strip()
+                item_type_name = type(item).__name__
 
-                if not text.strip():
+                # Skip empty items and groups
+                if not text or item_type_name == "GroupItem":
                     continue
 
-                # Map Docling labels to our section types
-                section_type = self._map_docling_label_to_section_type(item_type)
-
-                # Get title from heading items
-                title = None
-                if item_type and "heading" in str(item_type).lower():
-                    title = text.strip()
-                    text = ""  # Title is the content for headings
-
-                # Skip if no meaningful text
-                if not text.strip() and not title:
+                # Skip page headers/footers
+                if label in ("page_header", "page_footer"):
                     continue
 
-                section = ParsedSection(
-                    section_type=section_type,
-                    title=title,
-                    text=text,
+                # Handle section headers - start a new section
+                if label == "section_header" or item_type_name == "SectionHeaderItem":
+                    # Save previous section if exists
+                    if current_section_text or current_section_title:
+                        section_text = "\n".join(current_section_text)
+                        sections.append(ParsedSection(
+                            section_type=current_section_type,
+                            title=current_section_title,
+                            text=section_text,
+                            char_offset_start=char_offset,
+                            char_offset_end=char_offset + len(section_text),
+                        ))
+                        char_offset += len(section_text) + 2
+
+                    # Start new section
+                    current_section_title = text
+                    current_section_type = self._map_section_title_to_type(text)
+                    current_section_text = []
+
+                # Handle text content
+                elif label in ("text", "list_item", "caption"):
+                    current_section_text.append(text)
+
+                # Handle footnotes - add to current section
+                elif label == "footnote":
+                    current_section_text.append(f"[footnote] {text}")
+
+            # Save final section
+            if current_section_text or current_section_title:
+                section_text = "\n".join(current_section_text)
+                sections.append(ParsedSection(
+                    section_type=current_section_type,
+                    title=current_section_title,
+                    text=section_text,
                     char_offset_start=char_offset,
-                    char_offset_end=char_offset + len(text),
-                )
-                sections.append(section)
-                char_offset += len(text) + 2  # +2 for newlines
+                    char_offset_end=char_offset + len(section_text),
+                ))
 
         except Exception as e:
             logger.warning("docling_section_extraction_error", error=str(e))
 
         return sections
+
+    def _map_section_title_to_type(self, title: str) -> SectionType:
+        """Map section title to section type.
+
+        Args:
+            title: Section title text
+
+        Returns:
+            SectionType enum
+        """
+        if not title:
+            return SectionType.OTHER
+
+        title_lower = title.lower()
+
+        # Check for common section patterns
+        if "abstract" in title_lower:
+            return SectionType.ABSTRACT
+        if "introduction" in title_lower:
+            return SectionType.INTRODUCTION
+        if any(x in title_lower for x in ("method", "material", "approach", "technique")):
+            return SectionType.METHODS
+        if "result" in title_lower:
+            return SectionType.RESULTS
+        if "discussion" in title_lower:
+            return SectionType.DISCUSSION
+        if "conclusion" in title_lower:
+            return SectionType.CONCLUSION
+        if any(x in title_lower for x in ("reference", "bibliography")):
+            return SectionType.REFERENCES
+        if any(x in title_lower for x in ("acknowledgment", "acknowledgement")):
+            return SectionType.ACKNOWLEDGMENTS
+        if "appendix" in title_lower:
+            return SectionType.APPENDIX
+
+        return SectionType.OTHER
 
     def _map_docling_label_to_section_type(self, label) -> SectionType:
         """Map Docling label to our section type.

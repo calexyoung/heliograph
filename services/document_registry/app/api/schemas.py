@@ -152,6 +152,19 @@ class StateTransitionResponse(BaseModel):
     success: bool
 
 
+class ErrorResponse(BaseModel):
+    """Standardized error response schema."""
+
+    error_code: str = Field(..., description="Machine-readable error code")
+    message: str = Field(..., description="Human-readable error message")
+    details: Optional[dict[str, Any]] = Field(
+        None, description="Additional error details"
+    )
+    correlation_id: Optional[str] = Field(
+        None, description="Request correlation ID for tracing"
+    )
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
 
@@ -180,3 +193,15 @@ class DocumentListItem(BaseModel):
     status: DocumentStatus
     created_at: datetime
     updated_at: datetime
+
+
+class PaginatedDocumentList(BaseModel):
+    """Paginated response with cursor support."""
+
+    items: list[DocumentListItem] = Field(default_factory=list)
+    total: int = Field(..., description="Total number of items matching filters")
+    limit: int = Field(..., description="Maximum items per page")
+    next_cursor: Optional[str] = Field(
+        None, description="Cursor to fetch next page (base64-encoded document_id)"
+    )
+    has_more: bool = Field(..., description="Whether more items exist")

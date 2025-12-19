@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from services.document_registry.app.db.models import Base, DocumentModel, ProvenanceModel
 from services.document_registry.app.main import app
 from services.document_registry.app.dependencies import get_db, get_sqs_client
+from services.document_registry.app.config import Settings, get_settings
 from shared.schemas.document import DocumentStatus
 
 
@@ -72,11 +73,24 @@ def mock_sqs_client():
     """Create mock SQS client for testing."""
     mock = MagicMock()
     mock.send_message = AsyncMock(return_value="test-message-id-123")
+    mock.queue_url = "http://test/queue"
     return mock
 
 
 @pytest.fixture
-async def test_client(db_engine, mock_sqs_client) -> AsyncGenerator[AsyncClient, None]:
+def test_settings():
+    """Create test settings."""
+    return Settings(
+        environment="test",
+        database_url="sqlite+aiosqlite:///:memory:",
+        sqs_queue_url="http://test/queue",
+        sqs_endpoint_url=None,
+        rate_limit_enabled=False,  # Disable rate limiting in tests
+    )
+
+
+@pytest.fixture
+async def test_client(db_engine, mock_sqs_client, test_settings) -> AsyncGenerator[AsyncClient, None]:
     """Create test client with mocked dependencies."""
     session_factory = async_sessionmaker(
         bind=db_engine,
@@ -96,12 +110,17 @@ async def test_client(db_engine, mock_sqs_client) -> AsyncGenerator[AsyncClient,
     def override_get_sqs_client():
         return mock_sqs_client
 
+    def override_get_settings():
+        return test_settings
+
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_sqs_client] = override_get_sqs_client
+    app.dependency_overrides[get_settings] = override_get_settings
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
+        headers={"X-Test-Bypass-RateLimit": "true"},  # Bypass rate limiting in tests
     ) as client:
         yield client
 

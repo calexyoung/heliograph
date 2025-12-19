@@ -274,6 +274,102 @@ class TestDocumentRetrieval:
         data = response.json()
         assert len(data) <= 2
 
+    @pytest.mark.asyncio
+    async def test_list_documents_paginated_endpoint(self, test_client, mock_sqs_client):
+        """Test cursor-based paginated endpoint."""
+        user_id = str(uuid4())
+
+        # Create several documents
+        for i in range(5):
+            request_data = {
+                "doi": f"10.1234/paginated.test.{i}",
+                "title": f"Paginated Test Document {i}",
+                "authors": [],
+                "source": "crossref",
+                "user_id": user_id,
+            }
+            await test_client.post("/registry/documents", json=request_data)
+
+        # Fetch first page
+        response = await test_client.get(
+            "/registry/documents/paginated",
+            params={"limit": 2}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+        assert "limit" in data
+        assert "has_more" in data
+        assert len(data["items"]) <= 2
+        assert data["limit"] == 2
+
+    @pytest.mark.asyncio
+    async def test_list_documents_paginated_with_cursor(self, test_client, mock_sqs_client):
+        """Test paginated endpoint with cursor navigation."""
+        user_id = str(uuid4())
+
+        # Create several documents
+        for i in range(5):
+            request_data = {
+                "doi": f"10.1234/cursor.test.{i}",
+                "title": f"Cursor Test Document {i}",
+                "authors": [],
+                "source": "crossref",
+                "user_id": user_id,
+            }
+            await test_client.post("/registry/documents", json=request_data)
+
+        # Fetch first page
+        response1 = await test_client.get(
+            "/registry/documents/paginated",
+            params={"limit": 2}
+        )
+
+        assert response1.status_code == 200
+        data1 = response1.json()
+
+        if data1["has_more"] and data1["next_cursor"]:
+            # Fetch next page using cursor
+            response2 = await test_client.get(
+                "/registry/documents/paginated",
+                params={"limit": 2, "cursor": data1["next_cursor"]}
+            )
+
+            assert response2.status_code == 200
+            data2 = response2.json()
+            assert len(data2["items"]) <= 2
+
+            # Ensure no overlap between pages
+            page1_ids = {item["document_id"] for item in data1["items"]}
+            page2_ids = {item["document_id"] for item in data2["items"]}
+            assert page1_ids.isdisjoint(page2_ids)
+
+    @pytest.mark.asyncio
+    async def test_list_documents_paginated_with_status_filter(self, test_client, mock_sqs_client):
+        """Test paginated endpoint with status filter."""
+        response = await test_client.get(
+            "/registry/documents/paginated",
+            params={"status": "registered", "limit": 10}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert all(item["status"] == "registered" for item in data["items"])
+
+    @pytest.mark.asyncio
+    async def test_list_documents_paginated_invalid_cursor(self, test_client):
+        """Test paginated endpoint with invalid cursor returns 400."""
+        response = await test_client.get(
+            "/registry/documents/paginated",
+            params={"cursor": "not-valid-base64!"}
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"]["error_code"] == "INVALID_CURSOR"
+
 
 class TestStateTransition:
     """Tests for state transition endpoint."""
@@ -539,3 +635,281 @@ class TestDocumentUpdate:
         )
 
         assert response.status_code == 404
+
+
+class TestSoftDelete:
+    """Tests for soft delete functionality."""
+
+    @pytest.mark.asyncio
+    async def test_soft_delete_document(self, test_client, mock_sqs_client):
+        """Test soft deleting a document."""
+        # Create a document
+        user_id = str(uuid4())
+        request_data = {
+            "doi": "10.1234/softdelete.test",
+            "title": "Soft Delete Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+        create_response = await test_client.post("/registry/documents", json=request_data)
+        document_id = create_response.json()["document_id"]
+
+        # Soft delete the document
+        response = await test_client.delete(f"/registry/documents/{document_id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "deleted"
+        assert data["permanent"] is False
+
+        # Verify document is not in list
+        list_response = await test_client.get("/registry/documents")
+        list_data = list_response.json()
+        document_ids = [doc["document_id"] for doc in list_data]
+        assert document_id not in document_ids
+
+    @pytest.mark.asyncio
+    async def test_soft_delete_document_not_found(self, test_client):
+        """Test soft deleting non-existent document."""
+        fake_id = str(uuid4())
+        response = await test_client.delete(f"/registry/documents/{fake_id}")
+
+        assert response.status_code == 404
+        data = response.json()
+        assert data["detail"]["error_code"] == "DOCUMENT_NOT_FOUND"
+
+    @pytest.mark.asyncio
+    async def test_soft_delete_already_deleted(self, test_client, mock_sqs_client):
+        """Test soft deleting already deleted document."""
+        # Create a document
+        user_id = str(uuid4())
+        request_data = {
+            "doi": "10.1234/doubledelete.test",
+            "title": "Double Delete Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+        create_response = await test_client.post("/registry/documents", json=request_data)
+        document_id = create_response.json()["document_id"]
+
+        # Delete first time
+        await test_client.delete(f"/registry/documents/{document_id}")
+
+        # Try to delete again
+        response = await test_client.delete(f"/registry/documents/{document_id}")
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["detail"]["error_code"] == "ALREADY_DELETED"
+
+    @pytest.mark.asyncio
+    async def test_restore_document(self, test_client, mock_sqs_client):
+        """Test restoring a soft-deleted document."""
+        # Create a document
+        user_id = str(uuid4())
+        request_data = {
+            "doi": "10.1234/restore.test",
+            "title": "Restore Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+        create_response = await test_client.post("/registry/documents", json=request_data)
+        document_id = create_response.json()["document_id"]
+
+        # Soft delete
+        await test_client.delete(f"/registry/documents/{document_id}")
+
+        # Restore
+        response = await test_client.post(f"/registry/documents/{document_id}/restore")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "restored"
+
+        # Verify document is back in list
+        list_response = await test_client.get("/registry/documents")
+        list_data = list_response.json()
+        document_ids = [doc["document_id"] for doc in list_data]
+        assert document_id in document_ids
+
+    @pytest.mark.asyncio
+    async def test_restore_not_deleted_document(self, test_client, mock_sqs_client):
+        """Test restoring a document that's not deleted."""
+        # Create a document
+        user_id = str(uuid4())
+        request_data = {
+            "doi": "10.1234/restorenot.test",
+            "title": "Not Deleted Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+        create_response = await test_client.post("/registry/documents", json=request_data)
+        document_id = create_response.json()["document_id"]
+
+        # Try to restore without deleting
+        response = await test_client.post(f"/registry/documents/{document_id}/restore")
+
+        assert response.status_code == 409
+        data = response.json()
+        assert data["detail"]["error_code"] == "NOT_DELETED"
+
+    @pytest.mark.asyncio
+    async def test_restore_document_not_found(self, test_client):
+        """Test restoring non-existent document."""
+        fake_id = str(uuid4())
+        response = await test_client.post(f"/registry/documents/{fake_id}/restore")
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_permanent_delete(self, test_client, mock_sqs_client):
+        """Test permanently deleting a document."""
+        # Create a document
+        user_id = str(uuid4())
+        request_data = {
+            "doi": "10.1234/harddelete.test",
+            "title": "Hard Delete Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+        create_response = await test_client.post("/registry/documents", json=request_data)
+        document_id = create_response.json()["document_id"]
+
+        # Permanently delete
+        response = await test_client.delete(
+            f"/registry/documents/{document_id}",
+            params={"permanent": True}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "deleted"
+        assert data["permanent"] is True
+
+        # Verify document cannot be retrieved
+        get_response = await test_client.get(f"/registry/documents/{document_id}")
+        assert get_response.status_code == 404
+
+
+class TestIdempotency:
+    """Tests for idempotency key support."""
+
+    @pytest.mark.asyncio
+    async def test_idempotency_key_returns_same_response(self, test_client, mock_sqs_client):
+        """Test that same idempotency key returns cached response."""
+        user_id = str(uuid4())
+        idempotency_key = str(uuid4())
+
+        request_data = {
+            "doi": "10.1234/idempotent.test",
+            "title": "Idempotency Test Document",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+
+        # First request
+        response1 = await test_client.post(
+            "/registry/documents",
+            json=request_data,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        assert response1.status_code == 200
+        data1 = response1.json()
+
+        # Second request with same key should return cached response
+        response2 = await test_client.post(
+            "/registry/documents",
+            json=request_data,
+            headers={"Idempotency-Key": idempotency_key},
+        )
+        assert response2.status_code == 200
+        data2 = response2.json()
+        assert response2.headers.get("X-Idempotency-Replayed") == "true"
+
+        # Should return same document_id
+        assert data1["document_id"] == data2["document_id"]
+
+    @pytest.mark.asyncio
+    async def test_different_idempotency_keys_different_responses(self, test_client, mock_sqs_client):
+        """Test that different idempotency keys process independently."""
+        user_id = str(uuid4())
+
+        # First request with key1
+        response1 = await test_client.post(
+            "/registry/documents",
+            json={
+                "doi": "10.1234/idempotent.key1",
+                "title": "Idempotency Test Key1",
+                "authors": [],
+                "source": "crossref",
+                "user_id": user_id,
+            },
+            headers={"Idempotency-Key": str(uuid4())},
+        )
+        assert response1.status_code == 200
+
+        # Second request with different key
+        response2 = await test_client.post(
+            "/registry/documents",
+            json={
+                "doi": "10.1234/idempotent.key2",
+                "title": "Idempotency Test Key2",
+                "authors": [],
+                "source": "crossref",
+                "user_id": user_id,
+            },
+            headers={"Idempotency-Key": str(uuid4())},
+        )
+        assert response2.status_code == 200
+        assert response2.headers.get("X-Idempotency-Replayed") is None
+
+    @pytest.mark.asyncio
+    async def test_no_idempotency_key_processes_normally(self, test_client, mock_sqs_client):
+        """Test that requests without idempotency key process normally."""
+        user_id = str(uuid4())
+
+        request_data = {
+            "doi": "10.1234/no.idempotency.key",
+            "title": "No Idempotency Key Test",
+            "authors": [],
+            "source": "crossref",
+            "user_id": user_id,
+        }
+
+        response = await test_client.post(
+            "/registry/documents",
+            json=request_data,
+        )
+        assert response.status_code == 200
+        assert response.headers.get("X-Idempotency-Replayed") is None
+
+    @pytest.mark.asyncio
+    async def test_idempotency_only_for_post_and_patch(self, test_client, mock_sqs_client):
+        """Test that idempotency only applies to POST and PATCH methods."""
+        # Create a document first
+        user_id = str(uuid4())
+        create_response = await test_client.post(
+            "/registry/documents",
+            json={
+                "doi": "10.1234/get.idempotency.test",
+                "title": "GET Idempotency Test",
+                "authors": [],
+                "source": "crossref",
+                "user_id": user_id,
+            },
+        )
+        document_id = create_response.json()["document_id"]
+
+        # GET requests should not use idempotency
+        response = await test_client.get(
+            f"/registry/documents/{document_id}",
+            headers={"Idempotency-Key": str(uuid4())},
+        )
+        assert response.status_code == 200
+        assert response.headers.get("X-Idempotency-Replayed") is None

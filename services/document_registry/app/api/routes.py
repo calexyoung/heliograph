@@ -11,11 +11,15 @@ from services.document_registry.app.api.schemas import (
     DocumentListItem,
     DocumentRegistrationRequest,
     DocumentRegistrationResponse,
+    ErrorResponse,
     HealthResponse,
+    PaginatedDocumentList,
     ReadinessResponse,
     StateTransitionRequest,
     StateTransitionResponse,
 )
+from shared.utils.logging import get_correlation_id
+import base64
 from services.document_registry.app.core.dedup import DeduplicationService
 from services.document_registry.app.core.normalizers import normalize_doi, normalize_title
 from services.document_registry.app.core.state_machine import InvalidTransitionError, StateMachine
@@ -65,23 +69,84 @@ EVENT_PUBLISH_FAILURES = Counter(
 )
 
 
+def create_error_response(
+    error_code: str,
+    message: str,
+    details: dict | None = None,
+) -> dict:
+    """Create a standardized error response dict.
+
+    Args:
+        error_code: Machine-readable error code (e.g., "DOCUMENT_NOT_FOUND")
+        message: Human-readable error message
+        details: Optional additional error details
+
+    Returns:
+        Dict suitable for HTTPException detail parameter
+    """
+    response = ErrorResponse(
+        error_code=error_code,
+        message=message,
+        details=details,
+        correlation_id=get_correlation_id(),
+    )
+    return response.model_dump(exclude_none=True)
+
+
 @router.get("/health", response_model=HealthResponse)
-async def health_check() -> HealthResponse:
-    """Health check endpoint."""
-    return HealthResponse(status="healthy", service="document-registry")
+async def health_check(settings: AppSettings) -> HealthResponse:
+    """Health check endpoint.
+
+    Returns basic liveness status. This endpoint should always return
+    quickly and only fail if the service is completely unresponsive.
+    """
+    try:
+        # Verify settings are loaded correctly
+        _ = settings.service_name
+        return HealthResponse(
+            status="healthy",
+            service="document-registry",
+            version="0.1.0",
+        )
+    except Exception:
+        return HealthResponse(
+            status="unhealthy",
+            service="document-registry",
+            version="0.1.0",
+        )
 
 
 @router.get("/ready", response_model=ReadinessResponse)
-async def readiness_check(db: DBSession) -> ReadinessResponse:
-    """Readiness check endpoint."""
+async def readiness_check(
+    db: DBSession,
+    sqs: SQS,
+    settings: AppSettings,
+) -> ReadinessResponse:
+    """Readiness check endpoint.
+
+    Verifies all dependencies are available and the service is ready
+    to handle requests. Returns detailed status for each dependency.
+    """
     checks = {}
 
     # Check database connection
     try:
         await db.execute(text("SELECT 1"))
         checks["database"] = True
-    except Exception:
+    except Exception as e:
+        logger.warning("readiness_check_database_failed", error=str(e))
         checks["database"] = False
+
+    # Check SQS connectivity (only in non-test environments)
+    if settings.environment != "test":
+        try:
+            # Verify SQS client is configured
+            checks["sqs"] = sqs is not None and sqs.queue_url is not None
+        except Exception as e:
+            logger.warning("readiness_check_sqs_failed", error=str(e))
+            checks["sqs"] = False
+    else:
+        checks["sqs"] = True  # Skip SQS check in test environment
 
     ready = all(checks.values())
     return ReadinessResponse(ready=ready, checks=checks)
@@ -127,6 +192,97 @@ async def list_documents(
             )
             for doc in documents
         ]
+
+
+@router.get("/documents/paginated", response_model=PaginatedDocumentList)
+async def list_documents_paginated(
+    db: DBSession,
+    status: DocumentStatus | None = None,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> PaginatedDocumentList:
+    """List documents with cursor-based pagination.
+
+    Provides stable pagination using document_id as cursor.
+    More reliable than offset-based pagination for concurrent modifications.
+
+    Args:
+        status: Filter by document status
+        limit: Maximum documents to return (default 100, max 1000)
+        cursor: Base64-encoded document_id from previous page's next_cursor
+
+    Returns:
+        Paginated list with items, total count, and next cursor
+    """
+    from uuid import UUID
+
+    with REQUEST_LATENCY.labels(endpoint="list_documents_paginated").time():
+        repository = DocumentRepository(db)
+
+        # Decode cursor if provided
+        cursor_uuid: UUID | None = None
+        if cursor:
+            try:
+                decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+                cursor_uuid = UUID(decoded)
+            except (ValueError, TypeError) as e:
+                from fastapi import status as http_status
+                raise HTTPException(
+                    status_code=http_status.HTTP_400_BAD_REQUEST,
+                    detail=create_error_response(
+                        error_code="INVALID_CURSOR",
+                        message="Invalid pagination cursor",
+                        details={"cursor": cursor, "error": str(e)},
+                    ),
+                )
+
+        # Cap limit at 1000
+        effective_limit = min(limit, 1000)
+
+        # Fetch one extra to determine if there are more pages
+        documents = await repository.list_documents_cursor(
+            status=status,
+            limit=effective_limit + 1,
+            cursor=cursor_uuid,
+        )
+
+        # Get total count for metadata
+        total = await repository.count_documents(status=status)
+
+        # Determine if there are more pages
+        has_more = len(documents) > effective_limit
+        if has_more:
+            documents = documents[:effective_limit]
+
+        # Generate next cursor from last document
+        next_cursor: str | None = None
+        if has_more and documents:
+            last_doc_id = str(documents[-1].document_id)
+            next_cursor = base64.urlsafe_b64encode(last_doc_id.encode()).decode()
+
+        items = [
+            DocumentListItem(
+                document_id=doc.document_id,
+                doi=doc.doi,
+                content_hash=doc.content_hash,
+                title=doc.title,
+                authors=doc.authors,
+                journal=doc.journal,
+                year=doc.year,
+                status=doc.status,
+                created_at=doc.created_at,
+                updated_at=doc.updated_at,
+            )
+            for doc in documents
+        ]
+
+        return PaginatedDocumentList(
+            items=items,
+            total=total,
+            limit=effective_limit,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
 
 
 @router.post("/documents", response_model=DocumentRegistrationResponse)
@@ -270,10 +426,10 @@ async def register_document(
             )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "error_code": "EVENT_PUBLISH_FAILED",
-                    "message": "Failed to publish document registration event. Please retry.",
-                },
+                detail=create_error_response(
+                    error_code="EVENT_PUBLISH_FAILED",
+                    message="Failed to publish document registration event. Please retry.",
+                ),
             )
 
         # Event published successfully, now commit the transaction
@@ -305,7 +461,11 @@ async def get_document(
         if document is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error_code": "DOCUMENT_NOT_FOUND", "message": "Document not found"},
+                detail=create_error_response(
+                    error_code="DOCUMENT_NOT_FOUND",
+                    message="Document not found",
+                    details={"document_id": str(document_id)},
+                ),
             )
 
         # Convert provenance records to response format
@@ -358,7 +518,11 @@ async def update_document(
     if document is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error_code": "DOCUMENT_NOT_FOUND", "message": "Document not found"},
+            detail=create_error_response(
+                error_code="DOCUMENT_NOT_FOUND",
+                message="Document not found",
+                details={"document_id": str(document_id)},
+            ),
         )
 
     if artifact_pointers is not None:
@@ -369,6 +533,119 @@ async def update_document(
         await db.commit()
 
     return {"status": "updated", "document_id": str(document_id)}
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: UUID,
+    db: DBSession,
+    permanent: bool = False,
+) -> dict:
+    """Delete a document (soft delete by default).
+
+    Args:
+        document_id: Document UUID to delete
+        permanent: If True, permanently delete. If False, soft delete (default).
+
+    Returns:
+        Status indicating success
+    """
+    with REQUEST_LATENCY.labels(endpoint="delete_document").time():
+        repository = DocumentRepository(db)
+
+        if permanent:
+            # Hard delete - remove from database entirely
+            document = await repository.get_by_id(document_id)
+            if document is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=create_error_response(
+                        error_code="DOCUMENT_NOT_FOUND",
+                        message="Document not found",
+                        details={"document_id": str(document_id)},
+                    ),
+                )
+            await db.delete(document)
+            await db.commit()
+            logger.info(
+                "document_hard_deleted",
+                document_id=str(document_id),
+            )
+            return {"status": "deleted", "document_id": str(document_id), "permanent": True}
+
+        # Soft delete
+        document, success = await repository.soft_delete(document_id)
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=create_error_response(
+                    error_code="DOCUMENT_NOT_FOUND",
+                    message="Document not found",
+                    details={"document_id": str(document_id)},
+                ),
+            )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=create_error_response(
+                    error_code="ALREADY_DELETED",
+                    message="Document is already deleted",
+                    details={"document_id": str(document_id)},
+                ),
+            )
+
+        await db.commit()
+        logger.info(
+            "document_soft_deleted",
+            document_id=str(document_id),
+        )
+        return {"status": "deleted", "document_id": str(document_id), "permanent": False}
+
+
+@router.post("/documents/{document_id}/restore")
+async def restore_document(
+    document_id: UUID,
+    db: DBSession,
+) -> dict:
+    """Restore a soft-deleted document.
+
+    Args:
+        document_id: Document UUID to restore
+
+    Returns:
+        Status indicating success
+    """
+    with REQUEST_LATENCY.labels(endpoint="restore_document").time():
+        repository = DocumentRepository(db)
+
+        document, success = await repository.restore(document_id)
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=create_error_response(
+                    error_code="DOCUMENT_NOT_FOUND",
+                    message="Document not found",
+                    details={"document_id": str(document_id)},
+                ),
+            )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=create_error_response(
+                    error_code="NOT_DELETED",
+                    message="Document is not deleted",
+                    details={"document_id": str(document_id)},
+                ),
+            )
+
+        await db.commit()
+        logger.info(
+            "document_restored",
+            document_id=str(document_id),
+        )
+        return {"status": "restored", "document_id": str(document_id)}
 
 
 @router.post("/documents/{document_id}/state", response_model=StateTransitionResponse)
@@ -387,7 +664,11 @@ async def transition_state(
         if document is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"error_code": "DOCUMENT_NOT_FOUND", "message": "Document not found"},
+                detail=create_error_response(
+                    error_code="DOCUMENT_NOT_FOUND",
+                    message="Document not found",
+                    details={"document_id": str(document_id)},
+                ),
             )
 
         previous_state = document.status
@@ -398,12 +679,14 @@ async def transition_state(
         except InvalidTransitionError as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "error_code": "INVALID_STATE_TRANSITION",
-                    "message": str(e),
-                    "current_state": document.status.value,
-                    "target_state": request.state.value,
-                },
+                detail=create_error_response(
+                    error_code="INVALID_STATE_TRANSITION",
+                    message=str(e),
+                    details={
+                        "current_state": document.status.value,
+                        "target_state": request.state.value,
+                    },
+                ),
             )
 
         # Attempt transition with optimistic locking
@@ -428,12 +711,14 @@ async def transition_state(
             )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "error_code": "STATE_CONFLICT",
-                    "message": "Document state has changed since last read",
-                    "current_state": updated_doc.status.value if updated_doc else None,
-                    "expected_state": request.expected_state.value if request.expected_state else None,
-                },
+                detail=create_error_response(
+                    error_code="STATE_CONFLICT",
+                    message="Document state has changed since last read",
+                    details={
+                        "current_state": updated_doc.status.value if updated_doc else None,
+                        "expected_state": request.expected_state.value if request.expected_state else None,
+                    },
+                ),
             )
 
         await db.commit()

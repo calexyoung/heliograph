@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     # API settings
     api_prefix: str = "/registry"
     cors_origins: list[str] = ["http://localhost:3000"]
+    cors_allow_credentials: bool = True
+    cors_allow_methods: list[str] = ["*"]
+    cors_allow_headers: list[str] = ["*"]
+
+    # Rate limiting settings
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 60
+    rate_limit_burst: int = 10
 
 
 @lru_cache

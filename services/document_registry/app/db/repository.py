@@ -431,18 +431,23 @@ class DocumentRepository:
         status: DocumentStatus | None = None,
         limit: int = 100,
         offset: int = 0,
+        include_deleted: bool = False,
     ) -> list[DocumentModel]:
-        """List documents with optional filtering.
+        """List documents with optional filtering (offset-based).
 
         Args:
             status: Optional status filter
             limit: Maximum documents to return
             offset: Number of documents to skip
+            include_deleted: Whether to include soft-deleted documents
 
         Returns:
             List of document models
         """
         query = select(DocumentModel).order_by(DocumentModel.created_at.desc())
+
+        if not include_deleted:
+            query = query.where(DocumentModel.deleted_at.is_(None))
 
         if status is not None:
             query = query.where(DocumentModel.status == status)
@@ -450,3 +455,137 @@ class DocumentRepository:
         query = query.limit(limit).offset(offset)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def list_documents_cursor(
+        self,
+        status: DocumentStatus | None = None,
+        limit: int = 100,
+        cursor: UUID | None = None,
+        include_deleted: bool = False,
+    ) -> list[DocumentModel]:
+        """List documents with cursor-based pagination.
+
+        Uses document_id as cursor for stable pagination.
+        Documents are ordered by created_at DESC, document_id DESC.
+
+        Args:
+            status: Optional status filter
+            limit: Maximum documents to return
+            cursor: Last document_id from previous page
+            include_deleted: Whether to include soft-deleted documents
+
+        Returns:
+            List of document models
+        """
+        query = select(DocumentModel).order_by(
+            DocumentModel.created_at.desc(),
+            DocumentModel.document_id.desc(),
+        )
+
+        if not include_deleted:
+            query = query.where(DocumentModel.deleted_at.is_(None))
+
+        if status is not None:
+            query = query.where(DocumentModel.status == status)
+
+        if cursor is not None:
+            # Get the cursor document to find its created_at
+            cursor_doc = await self.get_by_id(cursor)
+            if cursor_doc:
+                # Get documents older than cursor OR same time but smaller ID
+                query = query.where(
+                    or_(
+                        DocumentModel.created_at < cursor_doc.created_at,
+                        and_(
+                            DocumentModel.created_at == cursor_doc.created_at,
+                            DocumentModel.document_id < cursor,
+                        ),
+                    )
+                )
+
+        query = query.limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_documents(
+        self,
+        status: DocumentStatus | None = None,
+        include_deleted: bool = False,
+    ) -> int:
+        """Count documents with optional filtering.
+
+        Args:
+            status: Optional status filter
+            include_deleted: Whether to include soft-deleted documents
+
+        Returns:
+            Total count of matching documents
+        """
+        from sqlalchemy import func
+
+        query = select(func.count()).select_from(DocumentModel)
+
+        if not include_deleted:
+            query = query.where(DocumentModel.deleted_at.is_(None))
+
+        if status is not None:
+            query = query.where(DocumentModel.status == status)
+
+        result = await self.session.execute(query)
+        return result.scalar() or 0
+
+    async def soft_delete(
+        self,
+        document_id: UUID,
+    ) -> tuple[DocumentModel | None, bool]:
+        """Soft delete a document by setting deleted_at timestamp.
+
+        Args:
+            document_id: Document UUID to soft delete
+
+        Returns:
+            Tuple of (document model, success flag)
+            If document not found, returns (None, False)
+            If already deleted, returns (document, False)
+        """
+        document = await self.get_by_id(document_id)
+        if document is None:
+            return None, False
+
+        if document.deleted_at is not None:
+            # Already deleted
+            return document, False
+
+        document.deleted_at = utc_now()
+        await self.session.flush()
+        return document, True
+
+    async def restore(
+        self,
+        document_id: UUID,
+    ) -> tuple[DocumentModel | None, bool]:
+        """Restore a soft-deleted document.
+
+        Args:
+            document_id: Document UUID to restore
+
+        Returns:
+            Tuple of (document model, success flag)
+            If document not found, returns (None, False)
+            If not deleted, returns (document, False)
+        """
+        # Need to bypass the default deleted filter
+        query = select(DocumentModel).where(DocumentModel.document_id == document_id)
+        result = await self.session.execute(query)
+        document = result.scalar_one_or_none()
+
+        if document is None:
+            return None, False
+
+        if document.deleted_at is None:
+            # Not deleted
+            return document, False
+
+        document.deleted_at = None
+        await self.session.flush()
+        return document, True

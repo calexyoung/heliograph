@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,13 @@ from services.ingestion.app.core.schemas import (
 from shared.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _to_uuid(value: str | UUID) -> UUID:
+    """Convert string or UUID to UUID."""
+    if isinstance(value, UUID):
+        return value
+    return UUID(value)
 
 
 class JobManager:
@@ -49,16 +57,16 @@ class JobManager:
         Returns:
             Created job
         """
-        job_id = str(uuid.uuid4())
+        job_id = uuid.uuid4()
 
         job_model = IngestionJobModel(
             job_id=job_id,
-            user_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),  # Default user for now
+            user_id=UUID("00000000-0000-0000-0000-000000000000"),  # Default user for now
             job_type=job_type.value,
             status=JobStatus.PENDING.value,
             source=source,
             query=query,
-            document_ids=[uuid.UUID(document_id)] if document_id else [],
+            document_ids=[str(document_id)] if document_id else [],  # Store as strings in JSON
             result_data=metadata or {},
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -77,7 +85,7 @@ class JobManager:
 
         return self._to_schema(job_model)
 
-    async def get_job(self, job_id: str) -> IngestionJob | None:
+    async def get_job(self, job_id: str | UUID) -> IngestionJob | None:
         """Get job by ID.
 
         Args:
@@ -86,8 +94,13 @@ class JobManager:
         Returns:
             Job or None
         """
+        try:
+            job_uuid = _to_uuid(job_id)
+        except (ValueError, AttributeError):
+            return None
+
         result = await self.db.execute(
-            select(IngestionJobModel).where(IngestionJobModel.job_id == job_id)
+            select(IngestionJobModel).where(IngestionJobModel.job_id == job_uuid)
         )
         job_model = result.scalar_one_or_none()
 
@@ -98,7 +111,7 @@ class JobManager:
 
     async def update_status(
         self,
-        job_id: str,
+        job_id: str | UUID,
         status: JobStatus,
         error: str | None = None,
         result_count: int | None = None,
@@ -116,9 +129,14 @@ class JobManager:
         Returns:
             Updated job or None
         """
+        try:
+            job_uuid = _to_uuid(job_id)
+        except (ValueError, AttributeError):
+            return None
+
         # Get current job
         result = await self.db.execute(
-            select(IngestionJobModel).where(IngestionJobModel.job_id == job_id)
+            select(IngestionJobModel).where(IngestionJobModel.job_id == job_uuid)
         )
         job_model = result.scalar_one_or_none()
 
@@ -216,7 +234,7 @@ class JobManager:
 
         return [self._to_schema(m) for m in job_models]
 
-    async def claim_job(self, job_id: str, worker_id: str) -> bool:
+    async def claim_job(self, job_id: str | UUID, worker_id: str) -> bool:
         """Claim a job for processing.
 
         Uses optimistic locking to prevent race conditions.
@@ -228,10 +246,15 @@ class JobManager:
         Returns:
             True if job was claimed
         """
+        try:
+            job_uuid = _to_uuid(job_id)
+        except (ValueError, AttributeError):
+            return False
+
         result = await self.db.execute(
             update(IngestionJobModel)
             .where(
-                IngestionJobModel.job_id == job_id,
+                IngestionJobModel.job_id == job_uuid,
                 IngestionJobModel.status == JobStatus.PENDING.value,
             )
             .values(
@@ -254,7 +277,7 @@ class JobManager:
 
         return False
 
-    async def cancel_job(self, job_id: str) -> IngestionJob | None:
+    async def cancel_job(self, job_id: str | UUID) -> IngestionJob | None:
         """Cancel a pending or running job.
 
         Args:
@@ -263,10 +286,15 @@ class JobManager:
         Returns:
             Cancelled job or None
         """
+        try:
+            job_uuid = _to_uuid(job_id)
+        except (ValueError, AttributeError):
+            return None
+
         result = await self.db.execute(
             update(IngestionJobModel)
             .where(
-                IngestionJobModel.job_id == job_id,
+                IngestionJobModel.job_id == job_uuid,
                 IngestionJobModel.status.in_([
                     JobStatus.PENDING.value,
                     JobStatus.RUNNING.value,

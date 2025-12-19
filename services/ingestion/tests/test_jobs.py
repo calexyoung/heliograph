@@ -22,10 +22,10 @@ class TestJobManager:
         )
 
         assert job.job_id is not None
-        assert job.job_type == JobType.IMPORT
-        assert job.status == JobStatus.PENDING
+        assert job.job_type == JobType.IMPORT.value
+        assert job.status == JobStatus.PENDING.value
         assert job.source == "crossref"
-        assert job.metadata["doi"] == "10.1234/test"
+        assert job.result_data["doi"] == "10.1234/test"
 
     @pytest.mark.asyncio
     async def test_get_job(self, test_session):
@@ -80,9 +80,9 @@ class TestJobManager:
             result_count=5,
         )
 
-        assert updated.status == JobStatus.COMPLETED
+        assert updated.status == JobStatus.COMPLETED.value
         assert updated.completed_at is not None
-        assert updated.result_count == 5
+        assert updated.result_data.get("result_count") == 5
 
     @pytest.mark.asyncio
     async def test_update_status_to_failed(self, test_session):
@@ -97,8 +97,8 @@ class TestJobManager:
             error="Connection timeout",
         )
 
-        assert updated.status == JobStatus.FAILED
-        assert updated.error == "Connection timeout"
+        assert updated.status == JobStatus.FAILED.value
+        assert updated.error_message == "Connection timeout"
         assert updated.completed_at is not None
 
     @pytest.mark.asyncio
@@ -127,7 +127,7 @@ class TestJobManager:
         jobs = await manager.list_jobs(job_type=JobType.IMPORT)
 
         assert len(jobs) == 2
-        assert all(j.job_type == JobType.IMPORT for j in jobs)
+        assert all(j.job_type == JobType.IMPORT.value for j in jobs)
 
     @pytest.mark.asyncio
     async def test_list_jobs_by_status(self, test_session):
@@ -201,5 +201,5 @@ class TestJobManager:
             metadata_updates={"new_key": "new_value"},
         )
 
-        assert updated.metadata["initial"] == "value"
-        assert updated.metadata["new_key"] == "new_value"
+        assert updated.result_data["initial"] == "value"
+        assert updated.result_data["new_key"] == "new_value"

@@ -11,11 +11,16 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
+    Uuid,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+# Database-agnostic types that use JSONB on PostgreSQL and JSON on SQLite
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -55,11 +60,11 @@ class IngestionJobModel(Base):
     __tablename__ = "ingestion_jobs"
 
     job_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
-    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     job_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
@@ -75,21 +80,21 @@ class IngestionJobModel(Base):
     query: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Progress
-    progress: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    progress: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
     total_items: Mapped[int] = mapped_column(Integer, default=0)
     processed_items: Mapped[int] = mapped_column(Integer, default=0)
 
     # Results
-    result_data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    result_data: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Related entities
-    document_ids: Mapped[list[UUID]] = mapped_column(
-        ARRAY(PG_UUID(as_uuid=True)),
+    # Related entities (stored as JSON for SQLite compatibility)
+    document_ids: Mapped[list] = mapped_column(
+        JSONType,
         default=list,
     )
-    upload_ids: Mapped[list[UUID]] = mapped_column(
-        ARRAY(PG_UUID(as_uuid=True)),
+    upload_ids: Mapped[list] = mapped_column(
+        JSONType,
         default=list,
     )
 
@@ -133,16 +138,16 @@ class ImportRecordModel(Base):
     __tablename__ = "import_records"
 
     import_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
     job_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         ForeignKey("ingestion_jobs.job_id", ondelete="CASCADE"),
         nullable=True,
     )
-    user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
 
     # Source
     source: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -150,12 +155,12 @@ class ImportRecordModel(Base):
 
     # Metadata
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
-    authors: Mapped[list[dict]] = mapped_column(JSONB, default=list)
+    authors: Mapped[list[dict]] = mapped_column(JSONType, default=list)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     doi: Mapped[str | None] = mapped_column(String(255), nullable=True)
     journal: Mapped[str | None] = mapped_column(String(500), nullable=True)
     abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    source_metadata: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
 
     # PDF
     pdf_url: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -171,7 +176,7 @@ class ImportRecordModel(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Result
-    document_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    document_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

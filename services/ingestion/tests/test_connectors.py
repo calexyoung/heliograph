@@ -151,7 +151,7 @@ class TestSciXplorerConnector:
         assert result.title == "Test Paper on Solar Physics"
         assert len(result.authors) == 2
         assert result.authors[0].family_name == "Smith"
-        assert result.year == "2024"
+        assert result.year == 2024
         assert result.journal == "Solar Physics"
         assert result.source_metadata["bibcode"] == "2024SoPh..299....1S"
         assert result.source_metadata["arxiv_id"] == "2401.12345"

@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="INGESTION_",
         case_sensitive=False,
+        extra="ignore",  # Ignore extra env vars not defined in this model
     )
 
     # Service settings
@@ -41,6 +42,9 @@ class Settings(BaseSettings):
 
     # Document Registry service
     document_registry_url: str = "http://localhost:8000"
+
+    # SQS settings
+    sqs_document_events_url: str = ""  # SQS queue URL for document events
 
     # Crossref API settings
     crossref_api_url: str = "https://api.crossref.org"

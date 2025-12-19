@@ -77,7 +77,7 @@ class UploadHandler:
         # Upload to S3
         try:
             await self.s3_client.upload_bytes(
-                bucket=settings.S3_BUCKET,
+                bucket=settings.s3_bucket,
                 key=s3_key,
                 data=content,
                 content_type="application/pdf",
@@ -163,7 +163,7 @@ class UploadHandler:
 
             # Upload to S3
             await self.s3_client.upload_bytes(
-                bucket=settings.S3_BUCKET,
+                bucket=settings.s3_bucket,
                 key=s3_key,
                 data=content,
                 content_type="application/pdf",
@@ -229,7 +229,7 @@ class UploadHandler:
 
         try:
             objects = await self.s3_client.list_objects(
-                bucket=settings.S3_BUCKET,
+                bucket=settings.s3_bucket,
                 prefix=prefix,
             )
 
@@ -260,7 +260,7 @@ class UploadHandler:
         """
         try:
             return await self.s3_client.generate_presigned_url(
-                bucket=settings.S3_BUCKET,
+                bucket=settings.s3_bucket,
                 key=s3_key,
                 operation="get_object",
                 expires_in=expires_in,
@@ -280,7 +280,7 @@ class UploadHandler:
         """
         try:
             await self.s3_client.delete_object(
-                bucket=settings.S3_BUCKET,
+                bucket=settings.s3_bucket,
                 key=s3_key,
             )
             logger.info("pdf_deleted", s3_key=s3_key)

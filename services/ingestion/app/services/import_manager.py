@@ -422,7 +422,7 @@ class ImportManager:
 
         try:
             await self.sqs_client.send_message(
-                queue_url=settings.SQS_DOCUMENT_EVENTS_URL,
+                queue_url=settings.sqs_document_events_url,
                 message=event,
             )
         except Exception as e:

@@ -1,0 +1,50 @@
+version: "3.8"
+
+# Docker Compose override for local file storage instead of S3/LocalStack
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.local-storage.yml up
+
+services:
+  # API Gateway - Use local storage
+  api-gateway:
+    environment:
+      GATEWAY_STORAGE_TYPE: local
+      GATEWAY_LOCAL_STORAGE_PATH: /data/heliograph
+      GATEWAY_S3_PUBLIC_ENDPOINT_URL: http://localhost:8080/files
+    volumes:
+      - heliograph_storage:/data/heliograph
+
+  # Document Processing - Use local storage
+  document-processing:
+    environment:
+      PROCESSING_STORAGE_TYPE: local
+      PROCESSING_LOCAL_STORAGE_PATH: /data/heliograph
+    volumes:
+      - heliograph_storage:/data/heliograph
+
+  # Document Registry - Use local storage
+  document-registry:
+    environment:
+      REGISTRY_STORAGE_TYPE: local
+      REGISTRY_LOCAL_STORAGE_PATH: /data/heliograph
+    volumes:
+      - heliograph_storage:/data/heliograph
+
+  # Ingestion - Use local storage
+  ingestion:
+    environment:
+      INGESTION_STORAGE_TYPE: local
+      INGESTION_LOCAL_STORAGE_PATH: /data/heliograph
+    volumes:
+      - heliograph_storage:/data/heliograph
+
+  # Knowledge Extraction - Use local storage (for artifact access)
+  knowledge-extraction:
+    environment:
+      EXTRACTION_STORAGE_TYPE: local
+      EXTRACTION_LOCAL_STORAGE_PATH: /data/heliograph
+    volumes:
+      - heliograph_storage:/data/heliograph
+
+volumes:
+  heliograph_storage:
+    name: heliograph-local-storage

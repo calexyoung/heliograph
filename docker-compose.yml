@@ -1,0 +1,377 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: heliograph-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: heliograph
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/document_registry/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: heliograph-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5-community
+    container_name: heliograph-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+    environment:
+      NEO4J_AUTH: neo4j/heliograph123
+      NEO4J_PLUGINS: '["apoc"]'
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: heliograph-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack (S3 and SQS emulation)
+  localstack:
+    image: localstack/localstack:latest
+    container_name: heliograph-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,sqs
+      DEBUG: 0
+      DATA_DIR: /var/lib/localstack/data
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+
+  # Document Registry Service
+  document-registry:
+    build:
+      context: .
+      dockerfile: services/document_registry/Dockerfile
+    container_name: heliograph-document-registry
+    ports:
+      - "8000:8000"
+    environment:
+      REGISTRY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      REGISTRY_SQS_QUEUE_URL: http://localstack:4566/000000000000/document-registered
+      REGISTRY_SQS_ENDPOINT_URL: http://localstack:4566
+      REGISTRY_S3_BUCKET: heliograph-documents
+      REGISTRY_S3_ENDPOINT_URL: http://localstack:4566
+      REGISTRY_LOG_JSON: "true"
+      REGISTRY_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/registry/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway Service
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
+    container_name: heliograph-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      GATEWAY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      GATEWAY_REDIS_URL: redis://redis:6379/0
+      GATEWAY_S3_BUCKET: heliograph-documents
+      GATEWAY_S3_ENDPOINT_URL: http://localstack:4566
+      GATEWAY_S3_PUBLIC_ENDPOINT_URL: http://localhost:4566
+      GATEWAY_DOCUMENT_REGISTRY_URL: http://document-registry:8000
+      GATEWAY_INGESTION_SERVICE_URL: http://ingestion:8002
+      GATEWAY_QUERY_ORCHESTRATOR_URL: http://query-orchestrator:8006
+      GATEWAY_KNOWLEDGE_EXTRACTION_URL: http://knowledge-extraction:8004
+      GATEWAY_JWT_SECRET_KEY: dev-secret-change-in-production
+      GATEWAY_LOG_JSON: "true"
+      GATEWAY_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      document-registry:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ingestion Service
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    container_name: heliograph-ingestion
+    ports:
+      - "8002:8002"
+    environment:
+      INGESTION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      INGESTION_S3_BUCKET: heliograph-documents
+      INGESTION_S3_ENDPOINT_URL: http://localstack:4566
+      INGESTION_SQS_DOCUMENT_EVENTS_URL: http://localstack:4566/000000000000/document-events
+      INGESTION_SQS_ENDPOINT_URL: http://localstack:4566
+      INGESTION_DOCUMENT_REGISTRY_URL: http://document-registry:8000
+      INGESTION_CROSSREF_MAILTO: ${CROSSREF_MAILTO:-contact@heliograph.io}
+      INGESTION_SEMANTIC_SCHOLAR_API_KEY: ${SEMANTIC_SCHOLAR_API_KEY:-}
+      INGESTION_ADS_API_TOKEN: ${ADS_API_TOKEN:-}
+      INGESTION_LOG_JSON: "true"
+      INGESTION_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+      document-registry:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # GROBID (PDF parsing service)
+  grobid:
+    image: grobid/grobid:0.8.0
+    container_name: heliograph-grobid
+    ports:
+      - "8070:8070"
+    volumes:
+      - grobid_data:/opt/grobid/grobid-home/tmp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Document Processing Service
+  document-processing:
+    build:
+      context: .
+      dockerfile: services/document_processing/Dockerfile
+    container_name: heliograph-document-processing
+    ports:
+      - "8003:8003"
+    environment:
+      PROCESSING_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      PROCESSING_REDIS_URL: redis://redis:6379/0
+      PROCESSING_S3_BUCKET: heliograph-documents
+      PROCESSING_S3_ENDPOINT_URL: http://localstack:4566
+      PROCESSING_SQS_DOCUMENT_REGISTERED_URL: http://localstack:4566/000000000000/document-registered
+      PROCESSING_SQS_DOCUMENT_INDEXED_URL: http://localstack:4566/000000000000/document-indexed
+      PROCESSING_SQS_DLQ_URL: http://localstack:4566/000000000000/document-dlq
+      PROCESSING_SQS_ENDPOINT_URL: http://localstack:4566
+      PROCESSING_DOCUMENT_REGISTRY_URL: http://document-registry:8000
+      PROCESSING_KNOWLEDGE_EXTRACTION_URL: http://knowledge-extraction:8004
+      PROCESSING_ENABLE_KNOWLEDGE_EXTRACTION: "true"
+      PROCESSING_GROBID_URL: http://grobid:8070
+      PROCESSING_QDRANT_URL: http://qdrant:6333
+      PROCESSING_EMBEDDING_PROVIDER: sentence_transformers
+      PROCESSING_EMBEDDING_MODEL: all-MiniLM-L6-v2
+      PROCESSING_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PROCESSING_LOG_JSON: "true"
+      PROCESSING_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      grobid:
+        condition: service_healthy
+      document-registry:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus (optional - for metrics)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: heliograph-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    profiles:
+      - observability
+
+  # Grafana (optional - for dashboards)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: heliograph-grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    profiles:
+      - observability
+
+  # Knowledge Extraction Service
+  knowledge-extraction:
+    build:
+      context: .
+      dockerfile: services/knowledge_extraction/Dockerfile
+    container_name: heliograph-knowledge-extraction
+    ports:
+      - "8004:8004"
+    environment:
+      EXTRACTION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      EXTRACTION_NEO4J_URI: bolt://neo4j:7687
+      EXTRACTION_NEO4J_USER: neo4j
+      EXTRACTION_NEO4J_PASSWORD: heliograph123
+      EXTRACTION_REDIS_URL: redis://redis:6379/0
+      EXTRACTION_S3_BUCKET: heliograph-documents
+      EXTRACTION_S3_ENDPOINT_URL: http://localstack:4566
+      EXTRACTION_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      EXTRACTION_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      EXTRACTION_USE_LANGCHAIN_EXTRACTOR: "true"
+      EXTRACTION_CONSTRAINED_EXTRACTION: "true"
+      EXTRACTION_LOG_JSON: "true"
+      EXTRACTION_DEBUG: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # LLM Generation Service
+  llm-generation:
+    build:
+      context: .
+      dockerfile: services/llm_generation/Dockerfile
+    container_name: heliograph-llm-generation
+    ports:
+      - "8005:8005"
+    environment:
+      LLM_REDIS_URL: redis://redis:6379/0
+      LLM_DEFAULT_PROVIDER: openai
+      LLM_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_LOG_JSON: "true"
+      LLM_DEBUG: "false"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Query Orchestrator Service
+  query-orchestrator:
+    build:
+      context: .
+      dockerfile: services/query_orchestrator/Dockerfile
+    container_name: heliograph-query-orchestrator
+    ports:
+      - "8006:8006"
+    environment:
+      QUERY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
+      QUERY_REDIS_URL: redis://redis:6379/0
+      QUERY_QDRANT_URL: http://qdrant:6333
+      QUERY_NEO4J_URI: bolt://neo4j:7687
+      QUERY_NEO4J_USER: neo4j
+      QUERY_NEO4J_PASSWORD: heliograph123
+      QUERY_LLM_SERVICE_URL: http://llm-generation:8005
+      QUERY_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      QUERY_LOG_JSON: "true"
+      QUERY_DEBUG: "false"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      neo4j:
+        condition: service_started
+      llm-generation:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: heliograph-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    profiles:
+      - frontend
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  neo4j_data:
+  redis_data:
+  localstack_data:
+  grobid_data:
+  prometheus_data:
+  grafana_data:

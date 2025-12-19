@@ -2,11 +2,17 @@
 
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Service settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="PROCESSING_",
+        case_sensitive=True,
+        extra="ignore",
+    )
 
     # Service
     SERVICE_NAME: str = "document-processing"
@@ -87,10 +93,6 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
-
-    class Config:
-        env_prefix = "PROCESSING_"
-        case_sensitive = True
 
 
 @lru_cache

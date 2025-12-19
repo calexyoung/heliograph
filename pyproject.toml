@@ -48,7 +48,7 @@ processing = [
     "tiktoken>=0.5.0",
     "PyMuPDF>=1.23.0",
     "openai>=1.0.0",
-    "docling>=2.15.0",  # IBM Research document converter - supports PDF, DOCX, PPTX, XLSX, HTML, images
+    "docling>=2.60.0",  # IBM Research document converter - supports PDF, DOCX, PPTX, XLSX, HTML, images with OCR
 ]
 
 # LiteLLM for unified LLM provider access

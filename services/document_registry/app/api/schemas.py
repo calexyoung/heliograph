@@ -39,6 +39,10 @@ class DocumentRegistrationRequest(BaseModel):
     source_metadata: Optional[dict[str, Any]] = Field(
         None, description="Additional source-specific metadata"
     )
+    s3_key: Optional[str] = Field(None, description="S3 key where PDF is stored")
+    storage_config: Optional[dict[str, Any]] = Field(
+        None, description="Storage configuration (type, local_path, bucket)"
+    )
 
     @field_validator("content_hash")
     @classmethod

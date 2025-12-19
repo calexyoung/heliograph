@@ -141,18 +141,30 @@ class ReprocessRequest(BaseModel):
     force: bool = False  # Force reprocess even if already indexed
 
 
-class DocumentRegisteredEvent(BaseModel):
-    """Event received when document is registered."""
+# Import from shared schemas for consistency
+from shared.schemas.events import (
+    DocumentRegisteredEvent,
+    StorageConfig,
+)
 
-    event_type: str = "DocumentRegistered"
-    document_id: UUID
-    content_hash: str | None = None
-    doi: str | None = None
-    title: str
-    s3_key: str | None = None
-    user_id: UUID
-    correlation_id: str
-    timestamp: datetime
+# Re-export for local usage
+__all__ = [
+    "ProcessingStatus",
+    "PipelineStage",
+    "SectionType",
+    "ParsedSection",
+    "ParsedReference",
+    "ExtractedText",
+    "Chunk",
+    "ChunkWithEmbedding",
+    "ProcessingJob",
+    "ProcessingResult",
+    "ReprocessRequest",
+    "DocumentRegisteredEvent",
+    "DocumentIndexedEvent",
+    "ChunkingConfig",
+    "StorageConfig",
+]
 
 
 class DocumentIndexedEvent(BaseModel):

@@ -15,6 +15,7 @@ from shared.schemas.events import (
     DocumentDuplicateEvent,
     DocumentRegisteredEvent,
     StateTransitionFailedEvent,
+    StorageConfig,
 )
 from shared.utils.logging import get_correlation_id, get_logger
 from shared.utils.sqs import SQSClient
@@ -50,6 +51,7 @@ class DocumentEventPublisher:
         document: DocumentModel,
         s3_key: str,
         user_id: UUID,
+        storage_config: dict | None = None,
     ) -> str | None:
         """Publish DocumentRegistered event.
 
@@ -57,10 +59,20 @@ class DocumentEventPublisher:
             document: Registered document model
             s3_key: S3 key where PDF is stored
             user_id: User who registered the document
+            storage_config: Optional storage configuration (type, local_path, bucket)
 
         Returns:
             Message ID if successful, None if failed
         """
+        # Convert storage config dict to StorageConfig model if provided
+        storage = None
+        if storage_config:
+            storage = StorageConfig(
+                type=storage_config.get("type", "s3"),
+                local_path=storage_config.get("local_path"),
+                bucket=storage_config.get("bucket"),
+            )
+
         event = DocumentRegisteredEvent(
             document_id=document.document_id,
             content_hash=document.content_hash,
@@ -68,6 +80,7 @@ class DocumentEventPublisher:
             title=document.title,
             s3_key=s3_key,
             user_id=user_id,
+            storage_config=storage,
             correlation_id=get_correlation_id(),
             timestamp=utc_now(),
         )

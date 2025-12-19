@@ -12,6 +12,7 @@ from services.api_gateway.app.api import (
     auth_router,
     files_router,
     health_router,
+    preferences_router,
     proxy_router,
     realtime_router,
     upload_router,
@@ -198,6 +199,7 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(files_router)
 app.include_router(upload_router)
+app.include_router(preferences_router)
 app.include_router(proxy_router)
 app.include_router(realtime_router)
 

@@ -37,6 +37,7 @@ class SQSClient:
         message: BaseModel | dict[str, Any],
         message_group_id: str | None = None,
         deduplication_id: str | None = None,
+        queue_url: str | None = None,
     ) -> str:
         """Send a message to the queue.
 
@@ -44,10 +45,12 @@ class SQSClient:
             message: Message body (Pydantic model or dict)
             message_group_id: Message group ID for FIFO queues
             deduplication_id: Deduplication ID for FIFO queues
+            queue_url: Optional queue URL (defaults to client's queue_url)
 
         Returns:
             Message ID from SQS
         """
+        url = queue_url or self.queue_url
         if isinstance(message, BaseModel):
             body = message.model_dump_json()
         else:
@@ -59,7 +62,7 @@ class SQSClient:
             endpoint_url=self.endpoint_url,
         ) as client:
             kwargs: dict[str, Any] = {
-                "QueueUrl": self.queue_url,
+                "QueueUrl": url,
                 "MessageBody": body,
             }
 
@@ -74,7 +77,7 @@ class SQSClient:
             logger.info(
                 "sqs_message_sent",
                 message_id=message_id,
-                queue_url=self.queue_url,
+                queue_url=url,
             )
 
             return message_id
@@ -120,3 +123,104 @@ class SQSClient:
                 )
 
             return [msg["MessageId"] for msg in successful]
+
+    async def receive_messages(
+        self,
+        queue_url: str | None = None,
+        max_messages: int = 10,
+        visibility_timeout: int = 30,
+        wait_time: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Receive messages from the queue.
+
+        Args:
+            queue_url: Queue URL (uses default if not specified)
+            max_messages: Maximum messages to receive (1-10)
+            visibility_timeout: Visibility timeout in seconds
+            wait_time: Long polling wait time in seconds
+
+        Returns:
+            List of messages
+        """
+        url = queue_url or self.queue_url
+
+        async with self._session.create_client(
+            "sqs",
+            region_name=self.region,
+            endpoint_url=self.endpoint_url,
+        ) as client:
+            response = await client.receive_message(
+                QueueUrl=url,
+                MaxNumberOfMessages=min(max_messages, 10),
+                VisibilityTimeout=visibility_timeout,
+                WaitTimeSeconds=wait_time,
+                AttributeNames=["All"],
+                MessageAttributeNames=["All"],
+            )
+
+            messages = response.get("Messages", [])
+            if messages:
+                logger.info(
+                    "sqs_messages_received",
+                    count=len(messages),
+                    queue_url=url,
+                )
+            return messages
+
+    async def delete_message(
+        self,
+        receipt_handle: str,
+        queue_url: str | None = None,
+    ) -> None:
+        """Delete a message from the queue.
+
+        Args:
+            receipt_handle: Message receipt handle
+            queue_url: Queue URL (uses default if not specified)
+        """
+        url = queue_url or self.queue_url
+
+        async with self._session.create_client(
+            "sqs",
+            region_name=self.region,
+            endpoint_url=self.endpoint_url,
+        ) as client:
+            await client.delete_message(
+                QueueUrl=url,
+                ReceiptHandle=receipt_handle,
+            )
+            logger.info(
+                "sqs_message_deleted",
+                queue_url=url,
+            )
+
+    async def change_visibility(
+        self,
+        receipt_handle: str,
+        visibility_timeout: int,
+        queue_url: str | None = None,
+    ) -> None:
+        """Change message visibility timeout.
+
+        Args:
+            receipt_handle: Message receipt handle
+            visibility_timeout: New visibility timeout in seconds
+            queue_url: Queue URL (uses default if not specified)
+        """
+        url = queue_url or self.queue_url
+
+        async with self._session.create_client(
+            "sqs",
+            region_name=self.region,
+            endpoint_url=self.endpoint_url,
+        ) as client:
+            await client.change_message_visibility(
+                QueueUrl=url,
+                ReceiptHandle=receipt_handle,
+                VisibilityTimeout=visibility_timeout,
+            )
+            logger.info(
+                "sqs_visibility_changed",
+                queue_url=url,
+                new_timeout=visibility_timeout,
+            )

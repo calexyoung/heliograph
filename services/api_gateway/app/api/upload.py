@@ -1,12 +1,12 @@
 """File upload API routes."""
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.api_gateway.app.auth.models import UploadModel
+from services.api_gateway.app.auth.models import UploadModel, UserModel
 from services.api_gateway.app.config import get_settings
 from services.api_gateway.app.middleware.auth import CurrentUser, get_db
 from services.api_gateway.app.upload.schemas import (
@@ -17,13 +17,16 @@ from services.api_gateway.app.upload.schemas import (
     UploadStatusResponse,
 )
 from services.api_gateway.app.upload.service import UploadError, UploadService
+from shared.utils.logging import get_logger
 from shared.utils.s3 import StorageClient, get_storage_client
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
 
 def get_storage() -> StorageClient:
-    """Get storage client dependency (S3 or local based on config)."""
+    """Get storage client dependency (S3 or local based on system config)."""
     settings = get_settings()
     return get_storage_client(
         storage_type=settings.storage_type,
@@ -35,6 +38,57 @@ def get_storage() -> StorageClient:
     )
 
 
+def get_user_storage(
+    current_user: UserModel,
+) -> tuple[StorageClient, dict[str, Any]]:
+    """Get user-specific storage client based on preferences.
+
+    Returns:
+        Tuple of (StorageClient, storage_config dict)
+    """
+    settings = get_settings()
+
+    # Get user's storage preferences
+    prefs = (current_user.preferences or {}).get("storage", {})
+    storage_type = prefs.get("type", settings.storage_type)
+    storage_config = {
+        "type": storage_type,
+        "local_path": prefs.get("local_path"),
+        "bucket": prefs.get("bucket"),
+    }
+
+    if storage_type == "local":
+        local_path = prefs.get("local_path") or settings.local_storage_path
+        client = get_storage_client(
+            storage_type="local",
+            bucket=settings.storage_bucket or settings.s3_bucket,
+            region=settings.s3_region,
+            endpoint_url=settings.s3_endpoint_url,
+            local_path=local_path,
+            serve_url=settings.s3_public_endpoint_url or "http://localhost:8080/files",
+        )
+        storage_config["local_path"] = local_path
+    else:
+        bucket = prefs.get("bucket") or settings.storage_bucket or settings.s3_bucket
+        client = get_storage_client(
+            storage_type="s3",
+            bucket=bucket,
+            region=settings.s3_region,
+            endpoint_url=settings.s3_endpoint_url,
+            local_path=settings.local_storage_path,
+            serve_url=settings.s3_public_endpoint_url or "http://localhost:8080/files",
+        )
+        storage_config["bucket"] = bucket
+
+    logger.debug(
+        "user_storage_resolved",
+        user_id=str(current_user.user_id),
+        storage_type=storage_type,
+    )
+
+    return client, storage_config
+
+
 DBSession = Annotated[AsyncSession, Depends(get_db)]
 Storage = Annotated[StorageClient, Depends(get_storage)]
 
@@ -44,14 +98,16 @@ async def create_presigned_url(
     request: PresignedUrlRequest,
     current_user: CurrentUser,
     db: DBSession,
-    storage: Storage,
 ) -> PresignedUrlResponse:
     """Get a pre-signed URL for file upload.
 
-    Use this URL to upload the file directly to S3, then call
-    POST /upload/{upload_id}/complete to trigger processing.
+    Use this URL to upload the file directly to S3 or local storage
+    (based on user preferences), then call POST /upload/{upload_id}/complete
+    to trigger processing.
     """
-    upload_service = UploadService(db, storage)
+    # Get user-specific storage client and config
+    storage, storage_config = get_user_storage(current_user)
+    upload_service = UploadService(db, storage, storage_config)
 
     try:
         response = await upload_service.create_presigned_url(
@@ -74,13 +130,15 @@ async def complete_upload(
     request: UploadCompleteRequest,
     current_user: CurrentUser,
     db: DBSession,
-    storage: Storage,
 ) -> UploadCompleteResponse:
     """Mark upload as complete and trigger document processing.
 
     Call this after successfully uploading the file to the pre-signed URL.
+    Uses the storage configuration that was set when the upload was initiated.
     """
-    upload_service = UploadService(db, storage)
+    # Get user-specific storage client (uses config stored in upload record)
+    storage, storage_config = get_user_storage(current_user)
+    upload_service = UploadService(db, storage, storage_config)
 
     try:
         response = await upload_service.complete_upload(

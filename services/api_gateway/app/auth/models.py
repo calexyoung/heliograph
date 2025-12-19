@@ -254,6 +254,14 @@ class UploadModel(Base):
     document_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Storage configuration used for this upload
+    storage_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONType,
+        default=dict,
+        nullable=False,
+        comment="Storage configuration: type (s3/local), local_path, bucket",
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

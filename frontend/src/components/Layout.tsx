@@ -8,6 +8,7 @@ import {
   Sun,
   LogOut,
   User,
+  Settings,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/corpus', icon: Library, label: 'Corpus' },
   { to: '/graph', icon: Network, label: 'Graph' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function Layout() {

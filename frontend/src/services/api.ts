@@ -7,6 +7,8 @@ import type {
   QueryRequest,
   QueryResponse,
   SubgraphResponse,
+  UserPreferences,
+  UpdatePreferencesRequest,
 } from '../types';
 
 const TOKEN_KEY = 'heliograph_tokens';
@@ -195,6 +197,24 @@ export const graphApi = {
         limit: options?.limit,
       },
     });
+    return response.data;
+  },
+};
+
+// User Preferences APIs
+export const preferencesApi = {
+  get: async () => {
+    const response = await api.get<UserPreferences>('/preferences');
+    return response.data;
+  },
+
+  update: async (request: UpdatePreferencesRequest) => {
+    const response = await api.put<UserPreferences>('/preferences', request);
+    return response.data;
+  },
+
+  getStorage: async () => {
+    const response = await api.get<UserPreferences['storage']>('/preferences/storage');
     return response.data;
   },
 };

@@ -168,3 +168,18 @@ export interface RegisterRequest {
   password: string;
   full_name?: string;
 }
+
+// User preferences types
+export interface StoragePreferences {
+  type: 's3' | 'local';
+  local_path?: string;
+  bucket?: string;
+}
+
+export interface UserPreferences {
+  storage: StoragePreferences;
+}
+
+export interface UpdatePreferencesRequest {
+  storage?: StoragePreferences;
+}

@@ -1,7 +1,7 @@
 """Event schemas for SQS messaging."""
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -14,6 +14,18 @@ class BaseEvent(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class StorageConfig(BaseModel):
+    """Storage configuration for document processing."""
+
+    type: str = Field(default="s3", description="Storage type: 's3' or 'local'")
+    local_path: Optional[str] = Field(
+        default=None, description="Local filesystem path for local storage"
+    )
+    bucket: Optional[str] = Field(
+        default=None, description="S3 bucket name (optional)"
+    )
+
+
 class DocumentRegisteredEvent(BaseEvent):
     """Event published when a new document is registered and ready for processing."""
 
@@ -24,6 +36,12 @@ class DocumentRegisteredEvent(BaseEvent):
     title: str
     s3_key: Optional[str] = None
     user_id: UUID
+
+    # Storage configuration for document processing
+    storage_config: Optional[StorageConfig] = Field(
+        default=None,
+        description="Storage configuration (type, local_path, bucket) for processing",
+    )
 
 
 class DocumentDuplicateEvent(BaseEvent):

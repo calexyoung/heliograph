@@ -403,9 +403,10 @@ async def register_document(
             connector_job_id=request.connector_job_id,
         )
 
-        # Derive S3 key from upload_id or connector_job_id
-        # Validate that we have a valid UUID for S3 key construction
-        if request.upload_id:
+        # Use provided S3 key or derive from upload_id/connector_job_id
+        if request.s3_key:
+            s3_key = request.s3_key
+        elif request.upload_id:
             s3_key = f"uploads/{request.upload_id}/document.pdf"
         elif request.connector_job_id:
             s3_key = f"imports/{request.connector_job_id}/{document_id_str}.pdf"
@@ -418,6 +419,7 @@ async def register_document(
             document=document,
             s3_key=s3_key,
             user_id=request.user_id,
+            storage_config=request.storage_config,
         )
 
         if message_id is None:

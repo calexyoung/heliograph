@@ -6,6 +6,7 @@ from services.api_gateway.app.api.upload import router as upload_router
 from services.api_gateway.app.api.proxy import router as proxy_router
 from services.api_gateway.app.api.realtime import router as realtime_router
 from services.api_gateway.app.api.health import router as health_router
+from services.api_gateway.app.api.preferences import router as preferences_router
 
 __all__ = [
     "auth_router",
@@ -14,4 +15,5 @@ __all__ = [
     "proxy_router",
     "realtime_router",
     "health_router",
+    "preferences_router",
 ]

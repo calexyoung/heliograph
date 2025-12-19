@@ -103,6 +103,31 @@ class PipelineOrchestrator:
         stage_timings: dict[str, float] = {}
         artifacts: dict[str, str] = {}
 
+        # Use event-specific storage config if provided, otherwise use default
+        original_storage_client = self.storage_client
+        if event.storage_config:
+            storage_type = event.storage_config.type
+            local_path = event.storage_config.local_path or settings.LOCAL_STORAGE_PATH
+            bucket = event.storage_config.bucket or settings.S3_BUCKET
+
+            logger.info(
+                "using_event_storage_config",
+                document_id=str(document_id),
+                storage_type=storage_type,
+                local_path=local_path if storage_type == "local" else None,
+            )
+
+            # Temporarily set instance storage client for this document
+            self.storage_client = get_storage_client(
+                storage_type=storage_type,
+                bucket=bucket,
+                region=settings.AWS_REGION,
+                endpoint_url=settings.S3_ENDPOINT_URL,
+                access_key=settings.AWS_ACCESS_KEY_ID,
+                secret_key=settings.AWS_SECRET_ACCESS_KEY,
+                local_path=local_path,
+            )
+
         # Create processing job
         job_id = uuid.uuid4()
         job = ProcessingJobModel(
@@ -118,6 +143,9 @@ class PipelineOrchestrator:
         )
         self.db.add(job)
         await self.db.commit()
+
+        # Update registry state to processing
+        await self._update_document_state(document_id, "processing")
 
         try:
             # Stage 1: Download PDF from S3
@@ -280,6 +308,11 @@ class PipelineOrchestrator:
                 processing_time_seconds=time.time() - start_time,
                 stage_timings=stage_timings,
             )
+
+        finally:
+            # Restore original storage client if it was changed
+            if event.storage_config:
+                self.storage_client = original_storage_client
 
     async def _download_pdf(self, s3_key: str) -> bytes:
         """Download PDF from S3.

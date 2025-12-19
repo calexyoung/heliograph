@@ -37,15 +37,18 @@ class UploadService:
         self,
         session: AsyncSession,
         storage_client: StorageClient,
+        storage_config: dict | None = None,
     ):
         """Initialize upload service.
 
         Args:
             session: Database session
             storage_client: Storage client (S3 or local)
+            storage_config: User's storage configuration (type, local_path, bucket)
         """
         self.session = session
         self.storage_client = storage_client
+        self.storage_config = storage_config or {"type": "s3"}
         self.settings = get_settings()
 
     async def create_presigned_url(
@@ -72,15 +75,19 @@ class UploadService:
                 f"File size exceeds maximum of {self.settings.max_upload_size_mb}MB"
             )
 
-        # Create upload record
+        # Determine bucket based on storage config
+        bucket = self.storage_config.get("bucket") or self.settings.s3_bucket
+
+        # Create upload record with storage configuration
         upload = UploadModel(
             user_id=user_id,
             filename=request.filename,
             content_type=request.content_type,
             size_bytes=request.size_bytes,
-            s3_bucket=self.settings.s3_bucket,
+            s3_bucket=bucket,
             s3_key=f"uploads/{user_id}/{datetime.utcnow().strftime('%Y/%m/%d')}/pending",
             status=UploadStatus.PENDING.value,
+            storage_config=self.storage_config,
         )
 
         self.session.add(upload)
@@ -233,9 +240,14 @@ class UploadService:
                 "source": "upload",
                 "upload_id": str(upload_id),
                 "user_id": str(user_id),
+                "s3_key": upload.s3_key,
             }
             if doi:
                 registration_request["doi"] = doi
+
+            # Include storage configuration for document processing
+            if upload.storage_config:
+                registration_request["storage_config"] = upload.storage_config
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(

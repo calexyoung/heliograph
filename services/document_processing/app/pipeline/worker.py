@@ -51,12 +51,11 @@ class PipelineWorker:
             expire_on_commit=False,
         )
 
-        # SQS client
+        # SQS client - uses AWS credential chain from environment
         self.sqs_client = SQSClient(
-            endpoint_url=settings.SQS_ENDPOINT_URL,
+            queue_url=settings.SQS_DOCUMENT_REGISTERED_URL,
             region=settings.AWS_REGION,
-            access_key=settings.AWS_ACCESS_KEY_ID,
-            secret_key=settings.AWS_SECRET_ACCESS_KEY,
+            endpoint_url=settings.SQS_ENDPOINT_URL,
         )
 
     async def start(self) -> None:

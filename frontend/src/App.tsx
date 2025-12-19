@@ -9,6 +9,7 @@ import CorpusPage from './pages/CorpusPage';
 import ChatPage from './pages/ChatPage';
 import GraphPage from './pages/GraphPage';
 import DocumentPage from './pages/DocumentPage';
+import SettingsPage from './pages/SettingsPage';
 
 function App() {
   return (
@@ -31,6 +32,7 @@ function App() {
         <Route path="chat" element={<ChatPage />} />
         <Route path="graph" element={<GraphPage />} />
         <Route path="documents/:documentId" element={<DocumentPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
     </>

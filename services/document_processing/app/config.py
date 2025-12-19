@@ -44,9 +44,15 @@ class Settings(BaseSettings):
     KNOWLEDGE_EXTRACTION_URL: str = "http://localhost:8004"
     ENABLE_KNOWLEDGE_EXTRACTION: bool = True
 
-    # GROBID
+    # GROBID (legacy, used as fallback for scientific PDFs)
     GROBID_URL: str = "http://localhost:8070"
     GROBID_TIMEOUT: int = 300  # 5 minutes
+
+    # Docling (primary parser - supports PDF, DOCX, PPTX, XLSX, HTML, images)
+    DOCLING_ENABLED: bool = True  # Use Docling as primary parser
+    DOCLING_OCR_ENABLED: bool = True  # Enable OCR for scanned documents
+    DOCLING_TABLE_STRUCTURE: bool = True  # Extract table structure
+    DOCLING_TIMEOUT: int = 300  # 5 minutes
 
     # Embedding Model
     EMBEDDING_PROVIDER: str = "sentence_transformers"  # openai, sentence_transformers

@@ -24,8 +24,8 @@ from services.document_processing.app.core.schemas import (
 )
 from services.document_processing.app.embeddings.generator import EmbeddingGenerator
 from services.document_processing.app.embeddings.qdrant import QdrantClient
-from services.document_processing.app.parsers.grobid import GrobidParser
 from services.document_processing.app.parsers.chunker import ChunkingService
+from services.document_processing.app.parsers.factory import ParserFactory
 from services.document_processing.app.parsers.segmenter import SectionSegmenter
 from shared.utils.logging import get_logger
 from shared.utils.s3 import StorageClient, get_storage_client
@@ -63,7 +63,10 @@ class PipelineOrchestrator:
         self.sqs_client = sqs_client
 
         # Initialize pipeline components
-        self.grobid_parser = GrobidParser(grobid_url=settings.GROBID_URL)
+        self.parser_factory = ParserFactory(
+            docling_enabled=settings.DOCLING_ENABLED,
+            prefer_grobid_for_scientific=True,  # Prefer GROBID for scientific PDFs when available
+        )
         self.segmenter = SectionSegmenter()
         self.chunker = ChunkingService(
             max_tokens=settings.CHUNK_MAX_TOKENS,
@@ -128,7 +131,11 @@ class PipelineOrchestrator:
             await self._update_job_stage(job_id, PipelineStage.PDF_PARSING)
             stage_start = time.time()
 
-            extracted = await self.grobid_parser.parse_pdf(pdf_content)
+            # Use parser factory to route to appropriate parser (Docling or GROBID)
+            extracted = await self.parser_factory.parse(
+                content=pdf_content,
+                filename=event.s3_key,  # Use S3 key for file type detection
+            )
             stage_timings["pdf_parsing"] = time.time() - stage_start
 
             # Store extracted text artifact

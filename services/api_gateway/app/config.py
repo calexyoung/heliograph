@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_prefix="GATEWAY_",
         case_sensitive=False,
+        extra="ignore",  # Ignore extra env vars not defined in this model
     )
 
     # Service settings

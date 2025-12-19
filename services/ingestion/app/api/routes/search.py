@@ -42,15 +42,17 @@ async def search_papers_get(
 
     Alternative to POST for simple queries.
     """
-    source_list = sources.split(",") if sources else None
+    # Build request kwargs, only including sources if explicitly provided
+    request_kwargs = {
+        "query": query,
+        "limit": limit,
+        "year_from": year_from,
+        "year_to": year_to,
+    }
+    if sources:
+        request_kwargs["sources"] = sources.split(",")
 
-    request = SearchRequest(
-        query=query,
-        limit=limit,
-        sources=source_list,
-        year_from=year_from,
-        year_to=year_to,
-    )
+    request = SearchRequest(**request_kwargs)
 
     return await search.search(request)
 

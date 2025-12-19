@@ -1,5 +1,6 @@
 """Tests for authentication service."""
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -123,6 +124,9 @@ class TestAuthService:
 
         # Create initial tokens
         token_pair = await auth_service.create_token_pair(user=test_user)
+
+        # Wait for 1 second to ensure different iat timestamp
+        await asyncio.sleep(1)
 
         # Refresh
         new_tokens = await auth_service.refresh_tokens(

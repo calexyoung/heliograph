@@ -227,15 +227,15 @@ class TestSearchOrchestrator:
         )
 
     @pytest.mark.asyncio
-    async def test_empty_sources(self, orchestrator):
-        """Test search with no enabled sources."""
+    async def test_empty_sources_uses_all_defaults(self, orchestrator):
+        """Test that empty sources list uses all default sources."""
         request = SearchRequest(
             query="test",
-            sources=["invalid_source"],
+            sources=[],  # Empty source list - should use all defaults
             limit=10,
         )
 
         response = await orchestrator.search(request)
 
-        assert len(response.results) == 0
-        assert len(response.sources_searched) == 0
+        # Empty list means use all available sources (the 'or' fallback behavior)
+        assert len(response.sources_searched) == len(orchestrator.connectors)

@@ -10,6 +10,7 @@ from typing import Any
 
 import aiofiles
 import aiofiles.os
+from aiobotocore.session import get_session
 
 from shared.utils.logging import get_logger
 

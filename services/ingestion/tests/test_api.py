@@ -8,6 +8,8 @@ from services.ingestion.app.core.schemas import (
     SearchResult,
     SourceStatus,
 )
+from services.ingestion.app.main import app
+from services.ingestion.app.api import deps
 from shared.schemas.author import AuthorSchema
 
 
@@ -66,13 +68,12 @@ class TestSearchEndpoints:
     @pytest.mark.asyncio
     async def test_search_post(self, client, mock_search_response):
         """Test POST search endpoint."""
-        with patch(
-            "services.ingestion.app.api.deps.get_search_orchestrator"
-        ) as mock_get:
-            mock_orchestrator = AsyncMock()
-            mock_orchestrator.search.return_value = mock_search_response
-            mock_get.return_value = mock_orchestrator
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.search.return_value = mock_search_response
 
+        app.dependency_overrides[deps.get_search_orchestrator] = lambda: mock_orchestrator
+
+        try:
             response = await client.post(
                 "/api/v1/search",
                 json={
@@ -85,17 +86,18 @@ class TestSearchEndpoints:
             data = response.json()
             assert data["query"] == "solar physics"
             assert len(data["results"]) == 1
+        finally:
+            app.dependency_overrides.pop(deps.get_search_orchestrator, None)
 
     @pytest.mark.asyncio
     async def test_search_get(self, client, mock_search_response):
         """Test GET search endpoint."""
-        with patch(
-            "services.ingestion.app.api.deps.get_search_orchestrator"
-        ) as mock_get:
-            mock_orchestrator = AsyncMock()
-            mock_orchestrator.search.return_value = mock_search_response
-            mock_get.return_value = mock_orchestrator
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.search.return_value = mock_search_response
 
+        app.dependency_overrides[deps.get_search_orchestrator] = lambda: mock_orchestrator
+
+        try:
             response = await client.get(
                 "/api/v1/search",
                 params={"query": "solar physics", "limit": 10},
@@ -104,6 +106,8 @@ class TestSearchEndpoints:
             assert response.status_code == 200
             data = response.json()
             assert data["query"] == "solar physics"
+        finally:
+            app.dependency_overrides.pop(deps.get_search_orchestrator, None)
 
     @pytest.mark.asyncio
     async def test_list_sources(self, client):
@@ -148,13 +152,12 @@ class TestUploadEndpoints:
     @pytest.mark.asyncio
     async def test_check_existing_not_found(self, client):
         """Test checking for non-existent file."""
-        with patch(
-            "services.ingestion.app.api.deps.get_upload_handler"
-        ) as mock_get:
-            mock_handler = AsyncMock()
-            mock_handler.check_existing.return_value = None
-            mock_get.return_value = mock_handler
+        mock_handler = AsyncMock()
+        mock_handler.check_existing.return_value = None
 
+        app.dependency_overrides[deps.get_upload_handler] = lambda: mock_handler
+
+        try:
             response = await client.get(
                 "/api/v1/upload/check-existing",
                 params={"content_hash": "abc123"},
@@ -163,17 +166,18 @@ class TestUploadEndpoints:
             assert response.status_code == 200
             data = response.json()
             assert data["exists"] is False
+        finally:
+            app.dependency_overrides.pop(deps.get_upload_handler, None)
 
     @pytest.mark.asyncio
     async def test_check_existing_found(self, client):
         """Test checking for existing file."""
-        with patch(
-            "services.ingestion.app.api.deps.get_upload_handler"
-        ) as mock_get:
-            mock_handler = AsyncMock()
-            mock_handler.check_existing.return_value = "documents/doc-123/abc123.pdf"
-            mock_get.return_value = mock_handler
+        mock_handler = AsyncMock()
+        mock_handler.check_existing.return_value = "documents/doc-123/abc123.pdf"
 
+        app.dependency_overrides[deps.get_upload_handler] = lambda: mock_handler
+
+        try:
             response = await client.get(
                 "/api/v1/upload/check-existing",
                 params={"content_hash": "abc123"},
@@ -183,6 +187,8 @@ class TestUploadEndpoints:
             data = response.json()
             assert data["exists"] is True
             assert data["s3_key"] == "documents/doc-123/abc123.pdf"
+        finally:
+            app.dependency_overrides.pop(deps.get_upload_handler, None)
 
 
 class TestImportEndpoints:
@@ -191,9 +197,11 @@ class TestImportEndpoints:
     @pytest.mark.asyncio
     async def test_import_requires_identifier(self, client):
         """Test import fails without identifier."""
-        with patch(
-            "services.ingestion.app.api.deps.get_import_manager"
-        ):
+        mock_manager = AsyncMock()
+
+        app.dependency_overrides[deps.get_import_manager] = lambda: mock_manager
+
+        try:
             response = await client.post(
                 "/api/v1/import",
                 json={},
@@ -201,3 +209,5 @@ class TestImportEndpoints:
 
             assert response.status_code == 400
             assert "identifier required" in response.json()["detail"].lower()
+        finally:
+            app.dependency_overrides.pop(deps.get_import_manager, None)

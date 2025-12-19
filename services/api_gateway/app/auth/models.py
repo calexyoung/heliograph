@@ -11,12 +11,18 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     BigInteger,
+    Uuid,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+# Database-agnostic types that use JSONB on PostgreSQL and JSON on SQLite
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -41,7 +47,7 @@ class UserModel(Base):
     __tablename__ = "users"
 
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
@@ -60,7 +66,7 @@ class UserModel(Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Metadata
-    preferences: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -108,12 +114,12 @@ class APIKeyModel(Base):
     __tablename__ = "api_keys"
 
     key_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
     user_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=True,
     )
@@ -124,7 +130,7 @@ class APIKeyModel(Base):
     key_prefix: Mapped[str] = mapped_column(String(8), nullable=False)
 
     # Permissions
-    scopes: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSONType, default=list, nullable=False)
     rate_limit_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Status
@@ -160,12 +166,12 @@ class RefreshTokenModel(Base):
     __tablename__ = "refresh_tokens"
 
     token_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -174,8 +180,9 @@ class RefreshTokenModel(Base):
     token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # Device info
-    device_info: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    ip_address: Mapped[str | None] = mapped_column(INET, nullable=True)
+    device_info: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
+    # Use String for SQLite compatibility (INET is PostgreSQL-specific)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 max length
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status
@@ -216,12 +223,12 @@ class UploadModel(Base):
     __tablename__ = "uploads"
 
     upload_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         primary_key=True,
         default=uuid4,
     )
     user_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
+        Uuid,
         ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -244,7 +251,7 @@ class UploadModel(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Linked document
-    document_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    document_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # Timestamps

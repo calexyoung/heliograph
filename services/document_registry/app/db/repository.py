@@ -164,7 +164,12 @@ class DocumentRepository:
         document_id = uuid4()
 
         # Check dialect to use appropriate insert strategy
-        dialect_name = self.session.bind.dialect.name if self.session.bind else "postgresql"
+        # Use run_sync to safely get dialect in async context
+        try:
+            bind = self.session.get_bind()
+            dialect_name = bind.dialect.name if bind else "postgresql"
+        except Exception:
+            dialect_name = "postgresql"
 
         if dialect_name == "sqlite":
             # SQLite fallback: check-then-insert pattern with race condition handling

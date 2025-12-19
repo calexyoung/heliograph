@@ -61,6 +61,7 @@ class StorageClient(ABC):
         key: str,
         data: bytes,
         content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         """Upload bytes to storage."""
         pass
@@ -228,6 +229,7 @@ class LocalStorageClient(StorageClient):
         key: str,
         data: bytes,
         content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         """Upload bytes to local storage."""
         # Use the bucket from parameter or instance
@@ -468,6 +470,7 @@ class S3Client(StorageClient):
         key: str,
         data: bytes,
         content_type: str = "application/octet-stream",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         """Upload bytes to S3.
 
@@ -476,6 +479,7 @@ class S3Client(StorageClient):
             key: S3 object key
             data: Bytes to upload
             content_type: MIME type of the content
+            metadata: Optional metadata to store with the object
         """
         async with self._session.create_client(
             "s3",
@@ -484,12 +488,15 @@ class S3Client(StorageClient):
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
         ) as client:
-            await client.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=data,
-                ContentType=content_type,
-            )
+            put_params = {
+                "Bucket": bucket,
+                "Key": key,
+                "Body": data,
+                "ContentType": content_type,
+            }
+            if metadata:
+                put_params["Metadata"] = metadata
+            await client.put_object(**put_params)
             logger.info("s3_upload_complete", bucket=bucket, key=key)
 
 

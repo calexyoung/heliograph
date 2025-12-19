@@ -31,12 +31,12 @@ def init_db(
     """
     global _engine, _session_factory
 
+    from sqlalchemy.pool import NullPool
+
     _engine = create_async_engine(
         database_url,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
         echo=echo,
-        pool_pre_ping=True,  # Enable connection health checks
+        poolclass=NullPool,  # Disable pooling to avoid greenlet issues with asyncpg
     )
 
     _session_factory = async_sessionmaker(

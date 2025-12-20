@@ -114,7 +114,20 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "services/document-registry/tests", "services/api-gateway/tests", "services/ingestion/tests", "services/document_processing/tests", "services/knowledge_extraction/tests", "services/query_orchestrator/tests", "services/llm_generation/tests"]
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["."]
+testpaths = [
+    "services/api_gateway/tests",
+    "services/document_processing/tests",
+    "services/document_registry/tests",
+    "services/ingestion/tests",
+    "services/knowledge_extraction/tests",
+    "services/query_orchestrator/tests",
+    "services/llm_generation/tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:litellm.*",
+]
 
 [dependency-groups]
 dev = [

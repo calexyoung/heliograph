@@ -1494,6 +1494,12 @@ processing = [
     { name = "tiktoken" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiobotocore", specifier = ">=2.9.0" },
@@ -1549,6 +1555,12 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
 ]
 provides-extras = ["ingestion", "processing", "llm", "langchain", "dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+]
 
 [[package]]
 name = "hf-xet"

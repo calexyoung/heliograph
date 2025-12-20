@@ -704,6 +704,18 @@ class PipelineOrchestrator:
             response.raise_for_status()
             doc_data = response.json()
 
+        # Extract storage config from source_metadata if available
+        source_metadata = doc_data.get("source_metadata", {})
+        storage_config_data = source_metadata.get("storage_config")
+        storage_config = None
+        if storage_config_data:
+            from services.document_processing.app.core.schemas import StorageConfig
+            storage_config = StorageConfig(
+                type=storage_config_data.get("type", "s3"),
+                local_path=storage_config_data.get("local_path"),
+                bucket=storage_config_data.get("bucket"),
+            )
+
         # Create synthetic event for reprocessing
         event = DocumentRegisteredEvent(
             document_id=document_id,
@@ -714,6 +726,7 @@ class PipelineOrchestrator:
             user_id=uuid.UUID(doc_data.get("provenance", [{}])[0].get("user_id", str(uuid.uuid4()))),
             correlation_id=f"reprocess-{document_id}",
             timestamp=datetime.now(timezone.utc),
+            storage_config=storage_config,
         )
 
         return await self.process_document(event, f"reprocess-worker-{uuid.uuid4().hex[:8]}")

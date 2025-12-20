@@ -88,6 +88,9 @@ class DocumentDetailResponse(BaseModel):
     status: DocumentStatus
     error_message: Optional[str] = None
     artifact_pointers: dict[str, str] = Field(default_factory=dict)
+    source_metadata: Optional[dict[str, Any]] = Field(
+        None, description="Additional source-specific metadata including storage config"
+    )
     provenance: list[ProvenanceEntry] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

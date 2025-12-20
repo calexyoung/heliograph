@@ -494,6 +494,7 @@ async def get_document(
             status=document.status,
             error_message=document.error_message,
             artifact_pointers=document.artifact_pointers,
+            source_metadata=document.source_metadata,
             provenance=provenance,
             created_at=document.created_at,
             updated_at=document.updated_at,

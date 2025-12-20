@@ -1,5 +1,6 @@
 """File storage routes for local filesystem storage."""
 
+from pathlib import Path
 from typing import Annotated
 
 import aiofiles
@@ -15,19 +16,25 @@ router = APIRouter(prefix="/files", tags=["files"])
 logger = get_logger(__name__)
 
 
-def get_local_storage() -> LocalStorageClient | None:
-    """Get local storage client if storage type is local."""
-    settings = get_settings()
-    if settings.storage_type != "local":
-        return None
+def get_local_storage() -> LocalStorageClient:
+    """Get local storage client for handling file uploads/downloads.
+
+    This is always enabled because users may have local storage preferences
+    even when the system default is S3. The actual storage path comes from
+    the upload token, not from this default client.
+    """
+    # Use /tmp as base path for the dependency injection default.
+    # The actual user-specific path is stored in upload tokens and used
+    # when processing uploads/downloads.
+    base_path = "/tmp/heliograph_storage"
     return LocalStorageClient(
-        base_path=settings.local_storage_path,
-        bucket=settings.storage_bucket or settings.s3_bucket,
-        serve_url=settings.s3_public_endpoint_url or "http://localhost:8080/files",
+        base_path=base_path,
+        bucket="heliograph-documents",
+        serve_url="http://localhost:8080/files",
     )
 
 
-LocalStorage = Annotated[LocalStorageClient | None, Depends(get_local_storage)]
+LocalStorage = Annotated[LocalStorageClient, Depends(get_local_storage)]
 
 
 @router.put("/upload/{token}")
@@ -43,12 +50,6 @@ async def upload_file_with_token(
 
     The token is validated against stored upload tokens.
     """
-    if storage is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Local storage not enabled",
-        )
-
     # Validate the upload token
     token_data = LocalStorageClient._upload_tokens.get(token)
     if not token_data:
@@ -78,8 +79,9 @@ async def upload_file_with_token(
             detail="No file content provided",
         )
 
-    # Store the file
-    file_path = storage._storage_dir / key
+    # Store the file using storage_dir from token (supports user-specific paths)
+    storage_dir = Path(token_data.get("storage_dir", str(storage._storage_dir)))
+    file_path = storage_dir / key
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiofiles.open(file_path, "wb") as f:
@@ -106,12 +108,6 @@ async def download_file_with_token(
 
     The token is validated against stored download tokens.
     """
-    if storage is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Local storage not enabled",
-        )
-
     # Validate the download token
     token_data = LocalStorageClient._upload_tokens.get(token)
     if not token_data or token_data.get("type") != "download":
@@ -132,8 +128,9 @@ async def download_file_with_token(
     # Don't remove download tokens - they can be reused within expiry time
     # (You might want to remove them for one-time use or check expiry)
 
-    # Get the file path
-    file_path = storage._storage_dir / key
+    # Get the file path using storage_dir from token (supports user-specific paths)
+    storage_dir = Path(token_data.get("storage_dir", str(storage._storage_dir)))
+    file_path = storage_dir / key
 
     # Check if file exists
     if not file_path.exists():

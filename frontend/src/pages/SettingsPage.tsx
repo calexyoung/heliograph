@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { preferencesApi } from '../services/api';
 import type { StoragePreferences } from '../types';
 
-const ALLOWED_PATH_PREFIXES = ['/data/', '/storage/', '/home/'];
+const ALLOWED_PATH_PREFIXES = ['/data/', '/storage/', '/home/', '/Users/', '/tmp/'];
 
 function validateLocalPath(path: string): string | null {
   if (!path) {

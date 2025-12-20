@@ -116,11 +116,12 @@ class LocalStorageClient(StorageClient):
         expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
         token = secrets.token_urlsafe(32)
 
-        # Store token for validation
+        # Store token for validation (include storage_dir for user-specific paths)
         LocalStorageClient._upload_tokens[token] = {
             "key": key,
             "content_type": content_type,
             "expires_at": expires_at,
+            "storage_dir": str(self._storage_dir),
         }
 
         # Ensure directory exists
@@ -155,11 +156,12 @@ class LocalStorageClient(StorageClient):
         expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
         token = secrets.token_urlsafe(32)
 
-        # Store token for validation
+        # Store token for validation (include storage_dir for user-specific paths)
         LocalStorageClient._upload_tokens[token] = {
             "key": key,
             "type": "download",
             "expires_at": expires_at,
+            "storage_dir": str(self._storage_dir),
         }
 
         presigned_url = f"{self.serve_url}/download/{token}"

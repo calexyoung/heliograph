@@ -6,7 +6,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Allowed base paths for local storage (whitelist for security)
-ALLOWED_LOCAL_PATH_PREFIXES = ["/data/", "/storage/", "/home/"]
+# Includes /Users/ for macOS development environments
+ALLOWED_LOCAL_PATH_PREFIXES = ["/data/", "/storage/", "/home/", "/Users/", "/tmp/"]
 
 
 class StoragePreferences(BaseModel):

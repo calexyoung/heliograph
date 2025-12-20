@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     circuit_breaker_half_open_requests: int = 3
 
     # CORS settings
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     # WebSocket/SSE settings
     ws_heartbeat_interval: int = 30

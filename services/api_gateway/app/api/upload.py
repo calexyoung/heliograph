@@ -59,13 +59,16 @@ def get_user_storage(
 
     if storage_type == "local":
         local_path = prefs.get("local_path") or settings.local_storage_path
+        # For local storage, serve files through the API gateway's /files endpoint
+        # Default to port 8080 (standard API gateway port)
+        local_serve_url = "http://localhost:8080/files"
         client = get_storage_client(
             storage_type="local",
             bucket=settings.storage_bucket or settings.s3_bucket,
             region=settings.s3_region,
             endpoint_url=settings.s3_endpoint_url,
             local_path=local_path,
-            serve_url=settings.s3_public_endpoint_url or "http://localhost:8080/files",
+            serve_url=local_serve_url,
         )
         storage_config["local_path"] = local_path
     else:

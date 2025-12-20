@@ -20,8 +20,10 @@ from shared.utils.s3 import StorageClient
 
 logger = get_logger(__name__)
 
-DOCUMENT_REGISTRY_URL = "http://document-registry:8000"
-DOCUMENT_PROCESSING_URL = "http://document-processing:8003"
+# Get URLs from settings (supports both local dev and Docker)
+_settings = get_settings()
+DOCUMENT_REGISTRY_URL = _settings.document_registry_url
+DOCUMENT_PROCESSING_URL = "http://localhost:8003"  # Document processing service
 
 
 class UploadError(Exception):

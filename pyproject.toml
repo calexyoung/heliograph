@@ -124,6 +124,7 @@ testpaths = [
     "services/knowledge_extraction/tests",
     "services/query_orchestrator/tests",
     "services/llm_generation/tests",
+    "shared/tests",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:litellm.*",

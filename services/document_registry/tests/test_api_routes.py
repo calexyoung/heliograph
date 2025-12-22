@@ -622,7 +622,7 @@ class TestDocumentUpdate:
         }
         response = await test_client.patch(
             f"/registry/documents/{document_id}",
-            params=update_data
+            json=update_data
         )
 
         assert response.status_code == 200
@@ -633,7 +633,7 @@ class TestDocumentUpdate:
         fake_id = str(uuid4())
         response = await test_client.patch(
             f"/registry/documents/{fake_id}",
-            params={"artifact_pointers": {"pdf": "test.pdf"}}
+            json={"artifact_pointers": {"pdf": "test.pdf"}}
         )
 
         assert response.status_code == 404

@@ -259,45 +259,45 @@ class UploadService:
                 response.raise_for_status()
                 reg_result = response.json()
 
-            upload.document_id = UUID(reg_result["document_id"])
-            upload.status = UploadStatus.PROCESSING.value
+                upload.document_id = UUID(reg_result["document_id"])
+                upload.status = UploadStatus.PROCESSING.value
 
-            logger.info(
-                "document_registered",
-                upload_id=str(upload_id),
-                document_id=reg_result["document_id"],
-                registration_status=reg_result["status"],
-            )
-
-            # Update registry with S3 key for processing
-            try:
-                await client.patch(
-                    f"{DOCUMENT_REGISTRY_URL}/registry/documents/{reg_result['document_id']}",
-                    json={"artifact_pointers": {"pdf": upload.s3_key}},
+                logger.info(
+                    "document_registered",
+                    upload_id=str(upload_id),
+                    document_id=reg_result["document_id"],
+                    registration_status=reg_result["status"],
                 )
-            except Exception as e:
-                logger.warning("artifact_pointer_update_failed", error=str(e))
 
-            # Trigger document processing
-            try:
-                process_response = await client.post(
-                    f"{DOCUMENT_PROCESSING_URL}/api/v1/processing/reprocess",
-                    json={"document_id": reg_result["document_id"]},
-                    timeout=10.0,  # Short timeout, processing runs async
-                )
-                if process_response.status_code == 200:
-                    logger.info(
-                        "document_processing_triggered",
-                        document_id=reg_result["document_id"],
+                # Update registry with S3 key for processing
+                try:
+                    await client.patch(
+                        f"{DOCUMENT_REGISTRY_URL}/registry/documents/{reg_result['document_id']}",
+                        json={"artifact_pointers": {"pdf": upload.s3_key}},
                     )
-                else:
-                    logger.warning(
-                        "document_processing_trigger_failed",
-                        document_id=reg_result["document_id"],
-                        status=process_response.status_code,
+                except Exception as e:
+                    logger.warning("artifact_pointer_update_failed", error=str(e))
+
+                # Trigger document processing
+                try:
+                    process_response = await client.post(
+                        f"{DOCUMENT_PROCESSING_URL}/api/v1/processing/reprocess",
+                        json={"document_id": reg_result["document_id"]},
+                        timeout=10.0,  # Short timeout, processing runs async
                     )
-            except Exception as e:
-                logger.warning("document_processing_trigger_error", error=str(e))
+                    if process_response.status_code == 200:
+                        logger.info(
+                            "document_processing_triggered",
+                            document_id=reg_result["document_id"],
+                        )
+                    else:
+                        logger.warning(
+                            "document_processing_trigger_failed",
+                            document_id=reg_result["document_id"],
+                            status=process_response.status_code,
+                        )
+                except Exception as e:
+                    logger.warning("document_processing_trigger_error", error=str(e))
 
         except httpx.HTTPStatusError as e:
             logger.error(

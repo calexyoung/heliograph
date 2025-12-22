@@ -17,6 +17,7 @@ from services.document_registry.app.api.schemas import (
     ReadinessResponse,
     StateTransitionRequest,
     StateTransitionResponse,
+    UpdateDocumentRequest,
 )
 from shared.utils.logging import get_correlation_id
 import base64
@@ -505,8 +506,8 @@ async def get_document(
 @router.patch("/documents/{document_id}")
 async def update_document(
     document_id: UUID,
+    request: UpdateDocumentRequest,
     db: DBSession,
-    artifact_pointers: dict | None = None,
 ) -> dict:
     """Update document attributes.
 
@@ -525,10 +526,11 @@ async def update_document(
             ),
         )
 
-    if artifact_pointers is not None:
+    if request.artifact_pointers is not None:
         # Merge with existing artifact_pointers
-        existing = document.artifact_pointers or {}
-        existing.update(artifact_pointers)
+        # Use dict() to create a copy so SQLAlchemy detects the change
+        existing = dict(document.artifact_pointers or {})
+        existing.update(request.artifact_pointers)
         await repository.update_artifact_pointers(document_id, existing)
         await db.commit()
 

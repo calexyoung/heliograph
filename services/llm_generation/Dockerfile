@@ -17,8 +17,8 @@ COPY services/llm_generation/ /app/services/llm_generation/
 # Copy pyproject.toml and README.md for dependencies
 COPY pyproject.toml README.md /app/
 
-# Install dependencies
-RUN pip install --no-cache-dir -e .
+# Install dependencies (including llm extras for litellm)
+RUN pip install --no-cache-dir -e ".[llm]"
 
 # Set Python path
 ENV PYTHONPATH=/app

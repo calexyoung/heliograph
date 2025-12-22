@@ -159,6 +159,44 @@ class StateTransitionResponse(BaseModel):
     success: bool
 
 
+class UpdateDocumentRequest(BaseModel):
+    """Request schema for updating document attributes."""
+
+    artifact_pointers: Optional[dict[str, str]] = Field(
+        None, description="Artifact pointers to update (will be merged with existing)"
+    )
+
+    @field_validator("artifact_pointers")
+    @classmethod
+    def validate_artifact_pointers(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        """Validate artifact pointer keys and values are valid S3 key formats."""
+        if v is None:
+            return v
+
+        valid_pointer_types = {"pdf", "markdown", "chunks", "embeddings", "graph"}
+
+        for key, value in v.items():
+            # Validate pointer type
+            if key not in valid_pointer_types:
+                raise ValueError(
+                    f"Invalid artifact pointer type '{key}'. "
+                    f"Must be one of: {', '.join(sorted(valid_pointer_types))}"
+                )
+            # Validate S3 key format (strip s3:// prefix if present)
+            key_to_validate = value
+            if key_to_validate.startswith("s3://"):
+                # Extract just the key part after bucket name
+                parts = key_to_validate[5:].split("/", 1)
+                key_to_validate = parts[1] if len(parts) > 1 else ""
+            if key_to_validate and not S3_KEY_PATTERN.match(key_to_validate):
+                raise ValueError(
+                    f"Invalid S3 key format for '{key}': '{value}'. "
+                    "S3 keys must start with alphanumeric and contain only "
+                    "alphanumeric characters, hyphens, underscores, periods, and forward slashes."
+                )
+        return v
+
+
 class ErrorResponse(BaseModel):
     """Standardized error response schema."""
 

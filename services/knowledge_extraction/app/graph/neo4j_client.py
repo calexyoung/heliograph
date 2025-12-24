@@ -195,17 +195,19 @@ class Neo4jClient:
         target_entity: ExtractedEntity,
     ) -> None:
         """Create a relationship between two entities."""
+        import json
+
         rel_type = relationship.relationship_type.value.upper()
 
-        # Serialize evidence
-        evidence_data = [
-            {
+        # Serialize each evidence item to JSON string (Neo4j can't store maps as properties)
+        evidence_strings = [
+            json.dumps({
                 "chunk_id": str(e.chunk_id),
                 "document_id": str(e.document_id),
                 "char_start": e.char_start,
                 "char_end": e.char_end,
                 "snippet": e.snippet,
-            }
+            })
             for e in relationship.evidence
         ]
 
@@ -231,7 +233,7 @@ class Neo4jClient:
                 target_canonical=target_entity.canonical_name,
                 target_type=target_entity.entity_type.value,
                 confidence=relationship.confidence,
-                evidence=evidence_data,
+                evidence=evidence_strings,
             )
 
     # Query operations
@@ -323,19 +325,27 @@ class Neo4jClient:
                 edge = self._rel_to_graph_edge(rel)
                 edges.append(edge)
 
-                # Extract evidence
+                # Extract evidence (stored as JSON strings in Neo4j)
                 if rel.get("evidence"):
-                    evidence_refs[edge.edge_id] = [
-                        EvidencePointer(
-                            chunk_id=UUID(e["chunk_id"]),
-                            document_id=UUID(e["document_id"]),
-                            char_start=e["char_start"],
-                            char_end=e["char_end"],
-                            snippet=e["snippet"],
-                        )
-                        for e in rel["evidence"]
-                        if isinstance(e, dict)
-                    ]
+                    import json
+                    evidence_refs[edge.edge_id] = []
+                    for e in rel["evidence"]:
+                        try:
+                            # Parse JSON string if needed
+                            if isinstance(e, str):
+                                e = json.loads(e)
+                            if isinstance(e, dict):
+                                evidence_refs[edge.edge_id].append(
+                                    EvidencePointer(
+                                        chunk_id=UUID(e["chunk_id"]),
+                                        document_id=UUID(e["document_id"]),
+                                        char_start=e["char_start"],
+                                        char_end=e["char_end"],
+                                        snippet=e["snippet"],
+                                    )
+                                )
+                        except (json.JSONDecodeError, KeyError):
+                            continue
 
             return SubgraphResponse(
                 nodes=nodes,
@@ -404,17 +414,26 @@ class Neo4jClient:
             if not record or not record["evidence"]:
                 return []
 
-            return [
-                EvidencePointer(
-                    chunk_id=UUID(e["chunk_id"]),
-                    document_id=UUID(e["document_id"]),
-                    char_start=e["char_start"],
-                    char_end=e["char_end"],
-                    snippet=e["snippet"],
-                )
-                for e in record["evidence"]
-                if isinstance(e, dict)
-            ]
+            import json
+            evidence_list = []
+            for e in record["evidence"]:
+                try:
+                    # Parse JSON string if needed
+                    if isinstance(e, str):
+                        e = json.loads(e)
+                    if isinstance(e, dict):
+                        evidence_list.append(
+                            EvidencePointer(
+                                chunk_id=UUID(e["chunk_id"]),
+                                document_id=UUID(e["document_id"]),
+                                char_start=e["char_start"],
+                                char_end=e["char_end"],
+                                snippet=e["snippet"],
+                            )
+                        )
+                except (json.JSONDecodeError, KeyError):
+                    continue
+            return evidence_list
 
     async def get_document_entities(self, document_id: UUID) -> list[GraphNode]:
         """Get all entities mentioned in a document."""

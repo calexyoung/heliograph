@@ -181,22 +181,44 @@ export default function GraphPage() {
     });
 
     // Prepare nodes and links for D3
-    const nodeMap = new Map(
-      filteredGraphData.nodes.map((n) => [n.node_id, n])
+    // Filter out any nodes without valid node_id
+    const validNodes = filteredGraphData.nodes.filter(
+      (n) => n.node_id != null && n.node_id !== ''
     );
+    const nodeMap = new Map(validNodes.map((n) => [n.node_id, n]));
+
+    // Debug logging
+    if (filteredGraphData.nodes.length !== validNodes.length) {
+      console.warn(
+        `Filtered out ${filteredGraphData.nodes.length - validNodes.length} nodes with invalid node_id`
+      );
+    }
 
     // Map edges to D3 link format (source/target instead of source_id/target_id)
+    // Also filter out edges with undefined/null source_id or target_id
     const validEdges = filteredGraphData.edges
-      .filter((e) => nodeMap.has(e.source_id) && nodeMap.has(e.target_id))
+      .filter(
+        (e) =>
+          e.source_id != null &&
+          e.target_id != null &&
+          nodeMap.has(e.source_id) &&
+          nodeMap.has(e.target_id)
+      )
       .map((e) => ({
         ...e,
         source: e.source_id,
         target: e.target_id,
       }));
 
-    // Create simulation
+    // Debug logging for filtered edges
+    const filteredOutEdges = filteredGraphData.edges.length - validEdges.length;
+    if (filteredOutEdges > 0) {
+      console.log(`Filtered out ${filteredOutEdges} edges (node type/relationship type filters or missing nodes)`);
+    }
+
+    // Create simulation using validNodes to ensure all nodes have valid IDs
     const simulation = d3
-      .forceSimulation(filteredGraphData.nodes as d3.SimulationNodeDatum[])
+      .forceSimulation(validNodes as d3.SimulationNodeDatum[])
       .force(
         'link',
         d3
@@ -245,7 +267,7 @@ export default function GraphPage() {
       .append('g')
       .attr('class', 'nodes')
       .selectAll<SVGGElement, GraphNode>('g')
-      .data(filteredGraphData.nodes)
+      .data(validNodes)
       .join('g')
       .attr('class', 'graph-node cursor-pointer')
       .call(

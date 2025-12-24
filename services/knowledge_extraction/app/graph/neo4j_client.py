@@ -306,9 +306,13 @@ class Neo4jClient:
             if not record:
                 return SubgraphResponse(nodes=[center_node], edges=[], center_node=center_node)
 
-            # Convert nodes
+            # Convert nodes and build element_id to node_id mapping
             nodes = [center_node]
             seen_ids = {center_node.node_id}
+            # Map Neo4j element IDs to our node IDs for relationship resolution
+            element_to_node_id: dict[str, str] = {}
+            if hasattr(center_record["n"], "element_id"):
+                element_to_node_id[center_record["n"].element_id] = center_node.node_id
 
             for node in record["allNodes"][:max_nodes]:
                 labels = list(node.labels)
@@ -316,13 +320,20 @@ class Neo4jClient:
                 if graph_node.node_id not in seen_ids:
                     nodes.append(graph_node)
                     seen_ids.add(graph_node.node_id)
+                # Map element_id to our node_id
+                if hasattr(node, "element_id"):
+                    element_to_node_id[node.element_id] = graph_node.node_id
 
-            # Convert edges
+            # Convert edges (only include edges where both nodes are in the result set)
             edges = []
             evidence_refs: dict[str, list[EvidencePointer]] = {}
 
             for rel in record["allRels"]:
-                edge = self._rel_to_graph_edge(rel)
+                edge = self._rel_to_graph_edge(rel, element_to_node_id)
+                # Only include edge if both source and target are in our node set
+                if edge.source_id not in seen_ids or edge.target_id not in seen_ids:
+                    continue
+
                 edges.append(edge)
 
                 # Extract evidence (stored as JSON strings in Neo4j)
@@ -485,22 +496,43 @@ class Neo4jClient:
             properties=serializable_props,
         )
 
-    def _rel_to_graph_edge(self, rel: Any) -> GraphEdge:
+    def _rel_to_graph_edge(
+        self, rel: Any, element_to_node_id: dict[str, str] | None = None
+    ) -> GraphEdge:
         """Convert a Neo4j relationship to GraphEdge."""
         props = dict(rel)
         start_node = rel.start_node
         end_node = rel.end_node
 
-        source_id = (
-            start_node.get("entity_id")
-            or start_node.get("document_id")
-            or str(id(start_node))
-        )
-        target_id = (
-            end_node.get("entity_id")
-            or end_node.get("document_id")
-            or str(id(end_node))
-        )
+        # Try to resolve node IDs using element_id mapping first (most reliable)
+        # Fall back to node properties, then to memory address (unreliable)
+        if element_to_node_id and hasattr(start_node, "element_id"):
+            source_id = element_to_node_id.get(
+                start_node.element_id,
+                start_node.get("entity_id")
+                or start_node.get("document_id")
+                or str(id(start_node)),
+            )
+        else:
+            source_id = (
+                start_node.get("entity_id")
+                or start_node.get("document_id")
+                or str(id(start_node))
+            )
+
+        if element_to_node_id and hasattr(end_node, "element_id"):
+            target_id = element_to_node_id.get(
+                end_node.element_id,
+                end_node.get("entity_id")
+                or end_node.get("document_id")
+                or str(id(end_node)),
+            )
+        else:
+            target_id = (
+                end_node.get("entity_id")
+                or end_node.get("document_id")
+                or str(id(end_node))
+            )
 
         # Convert properties to serializable types
         serializable_props = {

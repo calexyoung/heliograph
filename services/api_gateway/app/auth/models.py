@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Enum as SQLAEnum,
     ForeignKey,
     Index,
     Integer,
@@ -17,12 +18,14 @@ from sqlalchemy import (
     BigInteger,
     Uuid,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 # Database-agnostic types that use JSONB on PostgreSQL and JSON on SQLite
 JSONType = JSON().with_variant(JSONB(), "postgresql")
+# Use INET on PostgreSQL and String(45) on SQLite
+InetType = String(45).with_variant(INET(), "postgresql")
 
 
 class Base(DeclarativeBase):
@@ -181,8 +184,8 @@ class RefreshTokenModel(Base):
 
     # Device info
     device_info: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict)
-    # Use String for SQLite compatibility (INET is PostgreSQL-specific)
-    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 max length
+    # Use INET on PostgreSQL, String(45) on SQLite for IP address storage
+    ip_address: Mapped[str | None] = mapped_column(InetType, nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status
@@ -242,10 +245,15 @@ class UploadModel(Base):
     s3_key: Mapped[str] = mapped_column(String(500), nullable=False)
     s3_bucket: Mapped[str] = mapped_column(String(100), nullable=False)
 
-    # Status
+    # Status - use values_callable to use lowercase enum values
     status: Mapped[UploadStatus] = mapped_column(
-        String(20),
-        default=UploadStatus.PENDING.value,
+        SQLAEnum(
+            UploadStatus,
+            name="upload_status",
+            create_type=False,
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=UploadStatus.PENDING,
         nullable=False,
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

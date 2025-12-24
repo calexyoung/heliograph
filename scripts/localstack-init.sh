@@ -19,8 +19,8 @@ awslocal s3api put-bucket-cors --bucket heliograph-documents --cors-configuratio
         {
             "AllowedHeaders": ["*"],
             "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
-            "AllowedOrigins": ["http://localhost:3000", "http://localhost:5173"],
-            "ExposeHeaders": ["ETag"],
+            "AllowedOrigins": ["http://localhost:3000", "http://localhost:5173", "http://localhost:13000", "*"],
+            "ExposeHeaders": ["ETag", "x-amz-meta-custom-header"],
             "MaxAgeSeconds": 3000
         }
     ]

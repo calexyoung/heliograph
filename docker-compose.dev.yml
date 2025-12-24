@@ -1,3 +1,14 @@
+# Development compose file with alternate ports to avoid conflicts
+# Usage: docker compose -f docker-compose.dev.yml up -d
+#
+# Port mapping (avoids conflicts with svs-* and standalone neo4j):
+#   PostgreSQL: 15432 (svs uses 5433)
+#   Redis: 16379 (svs uses 6380)
+#   Qdrant: 16333/16334
+#   Neo4j: 17474/17687 (standalone uses 7474/7687)
+#   LocalStack: 14566
+#   Services: 18000-18080
+
 services:
   # PostgreSQL Database
   postgres:
@@ -8,9 +19,9 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: heliograph
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - heliograph_postgres_data:/var/lib/postgresql/data
       - ./services/document_registry/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -23,10 +34,10 @@ services:
     image: qdrant/qdrant:latest
     container_name: heliograph-qdrant
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "16333:6333"
+      - "16334:6334"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - heliograph_qdrant_data:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
 
@@ -35,10 +46,10 @@ services:
     image: neo4j:5-community
     container_name: heliograph-neo4j
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "17474:7474"
+      - "17687:7687"
     volumes:
-      - neo4j_data:/data
+      - heliograph_neo4j_data:/data
     environment:
       NEO4J_AUTH: neo4j/heliograph123
       NEO4J_PLUGINS: '["apoc"]'
@@ -48,9 +59,9 @@ services:
     image: redis:7-alpine
     container_name: heliograph-redis
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
-      - redis_data:/data
+      - heliograph_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -62,14 +73,18 @@ services:
     image: localstack/localstack:latest
     container_name: heliograph-localstack
     ports:
-      - "4566:4566"
+      - "14566:4566"
     environment:
       SERVICES: s3,sqs
       DEBUG: 0
       DATA_DIR: /var/lib/localstack/data
       DOCKER_HOST: unix:///var/run/docker.sock
+      # CORS configuration for browser uploads
+      EXTRA_CORS_ALLOWED_ORIGINS: "http://localhost:13000,http://localhost:3000"
+      EXTRA_CORS_ALLOWED_HEADERS: "*"
+      EXTRA_CORS_EXPOSE_HEADERS: "*"
     volumes:
-      - localstack_data:/var/lib/localstack
+      - heliograph_localstack_data:/var/lib/localstack
       - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
 
   # Document Registry Service
@@ -79,7 +94,7 @@ services:
       dockerfile: services/document_registry/Dockerfile
     container_name: heliograph-document-registry
     ports:
-      - "8000:8000"
+      - "18000:8000"
     environment:
       REGISTRY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       REGISTRY_SQS_QUEUE_URL: http://localstack:4566/000000000000/document-registered
@@ -106,13 +121,13 @@ services:
       dockerfile: services/api_gateway/Dockerfile
     container_name: heliograph-api-gateway
     ports:
-      - "8080:8080"
+      - "18080:8080"
     environment:
       GATEWAY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       GATEWAY_REDIS_URL: redis://redis:6379/0
       GATEWAY_S3_BUCKET: heliograph-documents
       GATEWAY_S3_ENDPOINT_URL: http://localstack:4566
-      GATEWAY_S3_PUBLIC_ENDPOINT_URL: http://localhost:4566
+      GATEWAY_S3_PUBLIC_ENDPOINT_URL: http://localhost:14566
       GATEWAY_DOCUMENT_REGISTRY_URL: http://document-registry:8000
       GATEWAY_INGESTION_SERVICE_URL: http://ingestion:8002
       GATEWAY_QUERY_ORCHESTRATOR_URL: http://query-orchestrator:8006
@@ -140,7 +155,7 @@ services:
       dockerfile: services/ingestion/Dockerfile
     container_name: heliograph-ingestion
     ports:
-      - "8002:8002"
+      - "18002:8002"
     environment:
       INGESTION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       INGESTION_S3_BUCKET: heliograph-documents
@@ -166,14 +181,15 @@ services:
       timeout: 10s
       retries: 3
 
-  # GROBID (PDF parsing service)
+  # GROBID (PDF parsing service) - use ARM compatible image or skip on M1
   grobid:
     image: grobid/grobid:0.8.0
+    platform: linux/amd64
     container_name: heliograph-grobid
     ports:
-      - "8070:8070"
+      - "18070:8070"
     volumes:
-      - grobid_data:/opt/grobid/grobid-home/tmp
+      - heliograph_grobid_data:/opt/grobid/grobid-home/tmp
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
       interval: 30s
@@ -187,7 +203,7 @@ services:
       dockerfile: services/document_processing/Dockerfile
     container_name: heliograph-document-processing
     ports:
-      - "8003:8003"
+      - "18003:8003"
     environment:
       PROCESSING_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       PROCESSING_REDIS_URL: redis://redis:6379/0
@@ -226,34 +242,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Prometheus (optional - for metrics)
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: heliograph-prometheus
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./infrastructure/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-    profiles:
-      - observability
-
-  # Grafana (optional - for dashboards)
-  grafana:
-    image: grafana/grafana:latest
-    container_name: heliograph-grafana
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    profiles:
-      - observability
-
   # Knowledge Extraction Service
   knowledge-extraction:
     build:
@@ -261,7 +249,7 @@ services:
       dockerfile: services/knowledge_extraction/Dockerfile
     container_name: heliograph-knowledge-extraction
     ports:
-      - "8004:8004"
+      - "18004:8004"
     environment:
       EXTRACTION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       EXTRACTION_NEO4J_URI: bolt://neo4j:7687
@@ -296,7 +284,7 @@ services:
       dockerfile: services/llm_generation/Dockerfile
     container_name: heliograph-llm-generation
     ports:
-      - "8005:8005"
+      - "18005:8005"
     environment:
       LLM_REDIS_URL: redis://redis:6379/0
       LLM_DEFAULT_PROVIDER: openai
@@ -320,7 +308,7 @@ services:
       dockerfile: services/query_orchestrator/Dockerfile
     container_name: heliograph-query-orchestrator
     ports:
-      - "8006:8006"
+      - "18006:8006"
     environment:
       QUERY_DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/heliograph
       QUERY_REDIS_URL: redis://redis:6379/0
@@ -358,18 +346,48 @@ services:
       dockerfile: Dockerfile
     container_name: heliograph-frontend
     ports:
-      - "3000:80"
+      - "13000:80"
+    environment:
+      VITE_API_URL: http://localhost:18080
     depends_on:
       - api-gateway
     profiles:
       - frontend
 
+  # Prometheus (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: heliograph-prometheus
+    ports:
+      - "19090:9090"
+    volumes:
+      - ./infrastructure/docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - heliograph_prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    profiles:
+      - observability
+
+  # Grafana (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: heliograph-grafana
+    ports:
+      - "13001:3000"
+    volumes:
+      - heliograph_grafana_data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    profiles:
+      - observability
+
 volumes:
-  postgres_data:
-  qdrant_data:
-  neo4j_data:
-  redis_data:
-  localstack_data:
-  grobid_data:
-  prometheus_data:
-  grafana_data:
+  heliograph_postgres_data:
+  heliograph_qdrant_data:
+  heliograph_neo4j_data:
+  heliograph_redis_data:
+  heliograph_localstack_data:
+  heliograph_grobid_data:
+  heliograph_prometheus_data:
+  heliograph_grafana_data:

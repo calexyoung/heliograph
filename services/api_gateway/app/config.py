@@ -30,13 +30,13 @@ class Settings(BaseSettings):
 
     # Redis settings (for sessions and rate limiting)
     redis_url: str = "redis://localhost:6379/0"
-    session_ttl_seconds: int = 3600  # 1 hour
+    session_ttl_seconds: int = 86400  # 24 hours
 
     # JWT settings
     jwt_secret_key: str = Field(default="change-me-in-production", description="JWT signing key")
     jwt_algorithm: str = "HS256"
-    jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    jwt_access_token_expire_minutes: int = 1440  # 24 hours
+    jwt_refresh_token_expire_days: int = 30
 
     # OAuth/OIDC settings (for external providers)
     oauth_enabled: bool = False

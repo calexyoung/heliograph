@@ -44,7 +44,7 @@ export interface SearchResult {
   source: string;
   doi?: string;
   title: string;
-  authors: string[];
+  authors: Author[];
   year?: number;
   abstract?: string;
   pdf_url?: string;

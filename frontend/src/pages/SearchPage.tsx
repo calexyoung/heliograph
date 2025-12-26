@@ -185,7 +185,9 @@ export default function SearchPage() {
                       {result.title}
                     </h3>
                     <p className="text-sm text-gray-600 mt-1">
-                      {result.authors.slice(0, 3).join(', ')}
+                      {result.authors.slice(0, 3).map(a =>
+                        a.name || (a.given_name ? `${a.given_name} ${a.family_name}` : a.family_name) || 'Unknown'
+                      ).join(', ')}
                       {result.authors.length > 3 && ' et al.'}
                       {result.year && ` (${result.year})`}
                     </p>

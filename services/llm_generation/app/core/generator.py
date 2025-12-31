@@ -222,6 +222,19 @@ class GenerationService:
         query = sanitize_input(request.query)
         context = sanitize_input(request.context)
 
+        # Handle SUMMARIZE intent specially - the query IS the full prompt
+        # This is used by evidence summarization where the prompt already
+        # contains the chunk text and instructions
+        if request.intent and request.intent.upper() == "SUMMARIZE":
+            system_prompt = (
+                "You are a helpful assistant that extracts relevant information "
+                "from scientific documents. Follow the instructions in the user message."
+            )
+            return [
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=query),
+            ]
+
         # Get citation mode
         citation_mode = request.citation_mode or self.settings.CITATION_MODE
 
